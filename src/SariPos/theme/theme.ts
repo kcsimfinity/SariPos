@@ -1,0 +1,20 @@
+export const getTheme = (isDark: boolean) => ({
+  isDark,
+  bg: isDark ? '#0b0f19' : '#f1f5f9',
+  surface: isDark ? '#151d2a' : '#ffffff',
+  surfaceElevated: isDark ? '#1e293b' : '#f8fafc',
+  border: isDark ? '#26334d' : '#e2e8f0',
+  textPrimary: isDark ? '#f8fafc' : '#0f172a',
+  textSecondary: isDark ? '#94a3b8' : '#64748b',
+  textMuted: isDark ? '#64748b' : '#94a3b8',
+  primary: '#2563eb',
+  primaryGlow: 'rgba(37, 99, 235, 0.15)',
+  accent: '#38bdf8',
+  success: '#10b981',
+  successGlow: 'rgba(16, 185, 129, 0.15)',
+  danger: '#f43f5e',
+  dangerGlow: 'rgba(244, 63, 94, 0.15)',
+  warning: '#f59e0b',
+  warningGlow: 'rgba(245, 158, 11, 0.15)',
+  cardShadow: isDark ? 'rgba(0,0,0,0.5)' : 'rgba(0,0,0,0.05)'
+});
