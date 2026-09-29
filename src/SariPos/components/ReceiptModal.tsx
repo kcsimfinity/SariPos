@@ -1,9 +1,9 @@
-import React from 'react';
-import { View, Text, Modal, TouchableOpacity, StyleSheet } from 'react-native';
-import { Sale } from '../types';
 import { Ionicons } from '@expo/vector-icons';
+import React from 'react';
+import { Modal, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 import { usePOS } from '../context/POSContext';
 import { getTheme } from '../theme/theme';
+import { Sale } from '../types';
 
 interface Props {
   sale: Sale | null;
@@ -19,64 +19,71 @@ export const ReceiptModal: React.FC<Props> = ({ sale, onClose }) => {
   return (
     <Modal visible={true} transparent animationType="fade" onRequestClose={onClose}>
       <View style={styles.overlay}>
-        <View style={[styles.card, { backgroundColor: theme.surface, borderColor: theme.border }]}>
+        <View style={[styles.card, { backgroundColor: theme.surface }]}>
           
-          <Ionicons 
-            name="checkmark-circle" 
-            size={48} 
-            color={theme.success} 
-            style={{ alignSelf: 'center', marginBottom: 8 }} 
-          />
-          
-          <Text style={[styles.title, { color: theme.textPrimary }]}>
-            Transaction Successful!
-          </Text>
-          <Text style={[styles.sub, { color: theme.textSecondary }]}>
-            Txn No: {sale.transaction_no}
-          </Text>
-
-          <View style={[styles.details, { backgroundColor: theme.bg, borderColor: theme.border }]}>
-            <Text style={[styles.line, { color: theme.textPrimary }]}>
-              Total Due: ₱{sale.total.toFixed(2)}
-            </Text>
-            
-            <Text style={[styles.line, { color: theme.textPrimary }]}>
-              Method: {sale.payment_method === 'CREDIT' ? 'UTANG / CREDIT' : 'CASH'}
-            </Text>
-
-            {sale.payment_method === 'CASH' && (
-              <>
-                <Text style={[styles.line, { color: theme.textPrimary }]}>
-                  Amount Given: ₱{sale.amount_paid.toFixed(2)}
-                </Text>
-                <Text style={[styles.line, { color: theme.success }]}>
-                  Change: ₱{sale.change_amount.toFixed(2)}
-                </Text>
-              </>
-            )}
-
-            {sale.payment_method === 'CREDIT' && (
-              <>
-                <Text style={[styles.line, { color: theme.textPrimary }]}>
-                  Borrower: {sale.customer_name}
-                </Text>
-                <Text style={[styles.line, { color: theme.textPrimary }]}>
-                  Downpayment: ₱{sale.amount_paid.toFixed(2)}
-                </Text>
-                <Text style={[styles.line, { color: theme.danger }]}>
-                  Added to Utang: ₱{(sale.total - sale.amount_paid).toFixed(2)}
-                </Text>
-              </>
-            )}
+          {/* LEFT: Success Status */}
+          <View style={styles.leftCol}>
+            <View style={[styles.iconBox, { backgroundColor: theme.successGlow }]}>
+              <Ionicons name="checkmark" size={36} color={theme.success} />
+            </View>
+            <Text style={[styles.title, { color: theme.textPrimary }]}>Success!</Text>
+            <Text style={[styles.sub, { color: theme.textSecondary }]}>Txn: {sale.transaction_no}</Text>
           </View>
 
-          <TouchableOpacity 
-            style={[styles.doneBtn, { backgroundColor: theme.primary }]} 
-            onPress={onClose}
-            activeOpacity={0.8}
-          >
-            <Text style={styles.doneText}>Done / Next Customer</Text>
-          </TouchableOpacity>
+          {/* RIGHT: Details & Action */}
+          <View style={styles.rightCol}>
+            <View style={[styles.details, { backgroundColor: theme.surfaceElevated, borderColor: theme.border }]}>
+              <View style={styles.row}>
+                <Text style={[styles.label, { color: theme.textSecondary }]}>Total</Text>
+                <Text style={[styles.val, { color: theme.textPrimary }]}>₱{sale.total.toFixed(2)}</Text>
+              </View>
+              <View style={styles.row}>
+                <Text style={[styles.label, { color: theme.textSecondary }]}>Method</Text>
+                <Text style={[styles.val, { color: theme.textPrimary }]}>
+                  {sale.payment_method === 'CREDIT' ? 'Utang' : 'Cash'}
+                </Text>
+              </View>
+
+              {sale.payment_method === 'CASH' && (
+                <>
+                  <View style={styles.row}>
+                    <Text style={[styles.label, { color: theme.textSecondary }]}>Paid</Text>
+                    <Text style={[styles.val, { color: theme.textPrimary }]}>₱{sale.amount_paid.toFixed(2)}</Text>
+                  </View>
+                  <View style={[styles.row, { marginTop: 4, paddingTop: 8, borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: theme.border }]}>
+                    <Text style={[styles.label, { color: theme.textSecondary }]}>Change</Text>
+                    <Text style={[styles.val, { color: theme.success, fontSize: 18 }]}>₱{sale.change_amount.toFixed(2)}</Text>
+                  </View>
+                </>
+              )}
+
+              {sale.payment_method === 'CREDIT' && (
+                <>
+                  <View style={styles.row}>
+                    <Text style={[styles.label, { color: theme.textSecondary }]}>Borrower</Text>
+                    <Text style={[styles.val, { color: theme.textPrimary }]} numberOfLines={1}>{sale.customer_name}</Text>
+                  </View>
+                  <View style={styles.row}>
+                    <Text style={[styles.label, { color: theme.textSecondary }]}>Downpayment</Text>
+                    <Text style={[styles.val, { color: theme.textPrimary }]}>₱{sale.amount_paid.toFixed(2)}</Text>
+                  </View>
+                  <View style={[styles.row, { marginTop: 4, paddingTop: 8, borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: theme.border }]}>
+                    <Text style={[styles.label, { color: theme.textSecondary }]}>Added to Utang</Text>
+                    <Text style={[styles.val, { color: theme.danger, fontSize: 18 }]}>₱{(sale.total - sale.amount_paid).toFixed(2)}</Text>
+                  </View>
+                </>
+              )}
+            </View>
+
+            <TouchableOpacity 
+              style={[styles.doneBtn, { backgroundColor: theme.primary }]} 
+              onPress={onClose}
+              activeOpacity={0.8}
+            >
+              <Text style={styles.doneText}>Next Customer</Text>
+            </TouchableOpacity>
+          </View>
+
         </View>
       </View>
     </Modal>
@@ -84,51 +91,20 @@ export const ReceiptModal: React.FC<Props> = ({ sale, onClose }) => {
 };
 
 const styles = StyleSheet.create({
-  overlay: { 
-    flex: 1, 
-    backgroundColor: 'rgba(0,0,0,0.75)', 
-    justifyContent: 'center', 
-    alignItems: 'center',
-    padding: 24
-  },
-  card: { 
-    width: '90%', 
-    maxWidth: 480, 
-    borderRadius: 14, 
-    borderWidth: 1,
-    padding: 20 
-  },
-  title: { 
-    fontSize: 16, 
-    fontWeight: 'bold', 
-    textAlign: 'center' 
-  },
-  sub: { 
-    fontSize: 12, 
-    textAlign: 'center', 
-    marginBottom: 16 
-  },
-  details: { 
-    padding: 14, 
-    borderRadius: 10, 
-    borderWidth: 1,
-    gap: 8 
-  },
-  line: { 
-    fontSize: 14, 
-    fontWeight: 'bold' 
-  },
-  doneBtn: { 
-    width: '100%', 
-    marginTop: 20, 
-    paddingVertical: 14, 
-    borderRadius: 10, 
-    alignItems: 'center',
-    justifyContent: 'center'
-  },
-  doneText: { 
-    color: '#ffffff', 
-    fontSize: 14,
-    fontWeight: 'bold' 
-  }
+  overlay: { flex: 1, backgroundColor: 'rgba(0,0,0,0.6)', justifyContent: 'center', alignItems: 'center', padding: 16 },
+  card: { width: '100%', maxWidth: 520, borderRadius: 16, padding: 20, elevation: 10, shadowColor: '#000', shadowOffset: { width: 0, height: 4 }, shadowOpacity: 0.1, shadowRadius: 8, flexDirection: 'row', alignItems: 'center', gap: 24 },
+  
+  leftCol: { flex: 1, alignItems: 'center', justifyContent: 'center' },
+  iconBox: { width: 72, height: 72, borderRadius: 36, justifyContent: 'center', alignItems: 'center', marginBottom: 16 },
+  title: { fontSize: 22, fontWeight: '900', marginBottom: 4 },
+  sub: { fontSize: 12 },
+  
+  rightCol: { flex: 1.4 },
+  details: { width: '100%', padding: 14, borderRadius: 12, borderWidth: StyleSheet.hairlineWidth, gap: 6 },
+  row: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' },
+  label: { fontSize: 12, fontWeight: '700' },
+  val: { fontSize: 13, fontWeight: '800' },
+  
+  doneBtn: { width: '100%', height: 44, marginTop: 16, borderRadius: 8, alignItems: 'center', justifyContent: 'center' },
+  doneText: { color: '#ffffff', fontSize: 14, fontWeight: '800' }
 });

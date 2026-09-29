@@ -1,22 +1,23 @@
-import React, { useState, useEffect } from 'react';
-import {
-  View,
-  Text,
-  TouchableOpacity,
-  FlatList,
-  TextInput,
-  StyleSheet,
-  Alert,
-  BackHandler
-} from 'react-native';
-import { usePOS } from '../context/POSContext';
-import { Product, Category } from '../types';
-import { dbService } from '../database/databaseService';
-import { ProductModal } from '../components/ProductModal';
-import { CategoryModal } from '../components/CategoryModal';
-import { StockModal } from '../components/StockModal';
 import { Ionicons } from '@expo/vector-icons';
+import React, { useEffect, useState } from 'react';
+import {
+    Alert,
+    BackHandler,
+    FlatList,
+    StyleSheet,
+    Text,
+    TextInput,
+    TouchableOpacity,
+    useWindowDimensions,
+    View
+} from 'react-native';
+import { CategoryModal } from '../components/CategoryModal';
+import { ProductModal } from '../components/ProductModal';
+import { StockModal } from '../components/StockModal';
+import { usePOS } from '../context/POSContext';
+import { dbService } from '../database/databaseService';
 import { getTheme } from '../theme/theme';
+import { Category, Product } from '../types';
 
 interface Props {
   category: Category | 'ALL';
@@ -26,6 +27,8 @@ interface Props {
 export const CategoryProductsScreen: React.FC<Props> = ({ category, onBack }) => {
   const { products, settings, refreshInventory } = usePOS();
   const theme = getTheme(settings.theme === 'dark');
+  const { width, height } = useWindowDimensions();
+  const isPortrait = height > width;
 
   const [searchQuery, setSearchQuery] = useState('');
   const [productModalVisible, setProductModalVisible] = useState(false);
@@ -79,15 +82,12 @@ export const CategoryProductsScreen: React.FC<Props> = ({ category, onBack }) =>
         </TouchableOpacity>
 
         <View style={styles.titleInfoGroup}>
-          <View style={[styles.categoryIconBadge, { backgroundColor: theme.primaryGlow }]}>
-            <Ionicons name="folder-open" size={22} color={theme.accent} />
-          </View>
           <View style={styles.textContainer}>
             <Text style={[styles.categoryTitle, { color: theme.textPrimary }]} numberOfLines={1}>
               {categoryName}
             </Text>
             <Text style={[styles.categorySub, { color: theme.textSecondary }]}>
-              {categoryProducts.length} {categoryProducts.length === 1 ? 'Product Listed' : 'Products Listed'}
+              {categoryProducts.length} items
             </Text>
           </View>
         </View>
@@ -98,7 +98,7 @@ export const CategoryProductsScreen: React.FC<Props> = ({ category, onBack }) =>
           activeOpacity={0.8}
         >
           <Ionicons name="add" size={18} color="#ffffff" />
-          <Text style={styles.addProductBtnText}>Add Product</Text>
+          {!isPortrait && <Text style={styles.addProductBtnText}>Add Product</Text>}
         </TouchableOpacity>
       </View>
 
@@ -107,7 +107,7 @@ export const CategoryProductsScreen: React.FC<Props> = ({ category, onBack }) =>
         <Ionicons name="search" size={18} color={theme.textSecondary} />
         <TextInput
           style={[styles.searchInput, { color: theme.textPrimary }]}
-          placeholder={`Search products inside ${categoryName}...`}
+          placeholder={`Search ${categoryName}...`}
           placeholderTextColor={theme.textMuted}
           value={searchQuery}
           onChangeText={setSearchQuery}
@@ -119,89 +119,66 @@ export const CategoryProductsScreen: React.FC<Props> = ({ category, onBack }) =>
         )}
       </View>
 
-      {/* 3. PRODUCT CATALOG DATA GRID */}
+      {/* 3. PRODUCT LIST */}
       {categoryProducts.length === 0 ? (
-        <View style={[styles.emptyStateCard, { backgroundColor: theme.surface, borderColor: theme.border }]}>
+        <View style={styles.emptyStateCard}>
           <Ionicons name="cube-outline" size={48} color={theme.textMuted} />
-          <Text style={[styles.emptyTitle, { color: theme.textPrimary }]}>
-            No products found in "{categoryName}"
-          </Text>
-          <Text style={[styles.emptySub, { color: theme.textSecondary }]}>
-            Tap the "Add Product" button on the top right to add items here.
-          </Text>
+          <Text style={[styles.emptyTitle, { color: theme.textPrimary }]}>No products found</Text>
         </View>
       ) : (
         <FlatList
           data={categoryProducts}
           keyExtractor={item => item.id}
-          contentContainerStyle={{ paddingBottom: 24 }}
+          contentContainerStyle={{ paddingBottom: 24, gap: 8 }}
           showsVerticalScrollIndicator={false}
           renderItem={({ item }) => {
             const isLow = item.stock_pieces <= item.min_stock_pieces && item.stock_pieces > 0;
             const isOut = item.stock_pieces < 1;
 
-            const pieceProfit = item.selling_price_piece - item.buying_price_piece;
-            const marginPct = item.selling_price_piece > 0 ? ((pieceProfit / item.selling_price_piece) * 100).toFixed(0) : '0';
-
             return (
-              <View style={[styles.productCardRow, { backgroundColor: theme.surface, borderColor: theme.border }]}>
+              <View style={[styles.productCardRow, { backgroundColor: theme.surface, borderColor: theme.border, flexDirection: isPortrait ? 'column' : 'row', alignItems: isPortrait ? 'stretch' : 'center' }]}>
                 
                 {/* Product Info */}
-                <View style={{ flex: 2.5 }}>
+                <View style={{ flex: isPortrait ? undefined : 2, marginBottom: isPortrait ? 10 : 0 }}>
                   <Text style={[styles.prodName, { color: theme.textPrimary }]} numberOfLines={1}>
                     {item.name}
                   </Text>
                   <Text style={[styles.prodMeta, { color: theme.textSecondary }]}>
-                    {item.pricing_type === 'PACK' ? `${item.pieces_per_pack} ${item.unit_piece_name}s/${item.unit_pack_name}` : `Single ${item.unit_piece_name}`}
-                    {item.barcode ? ` • Barcode: ${item.barcode}` : ''}
+                    BP: ₱{item.buying_price_piece.toFixed(2)} | SP: ₱{item.selling_price_piece.toFixed(2)}
                   </Text>
                 </View>
 
-                {/* Pricing & Profit Margin */}
-                <View style={{ flex: 1.5 }}>
-                  <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
-                    <Text style={[styles.priceText, { color: theme.textPrimary }]}>
-                      Piece: ₱{item.selling_price_piece.toFixed(2)}
-                    </Text>
-                    <View style={[styles.marginBadge, { backgroundColor: theme.successGlow }]}>
-                      <Text style={[styles.marginText, { color: theme.success }]}>+{marginPct}%</Text>
-                    </View>
-                  </View>
-
-                  {item.pricing_type === 'PACK' && (
-                    <Text style={[styles.priceSubText, { color: theme.textSecondary }]}>
-                      Pack: ₱{item.selling_price_pack.toFixed(2)}
-                    </Text>
-                  )}
-                </View>
-
                 {/* Stock Status Badge */}
-                <View style={{ flex: 1, alignItems: 'center' }}>
-                  <View style={[styles.statusBadge, { backgroundColor: isOut ? theme.dangerGlow : isLow ? theme.warningGlow : theme.successGlow }]}>
-                    <Text style={[styles.statusBadgeText, { color: isOut ? theme.danger : isLow ? theme.warning : theme.success }]}>
-                      {item.stock_pieces} {item.unit_piece_name}s
+                <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', flex: isPortrait ? undefined : 2 }}>
+                  <View>
+                    <View style={[styles.statusBadge, { backgroundColor: isOut ? theme.dangerGlow : isLow ? theme.warningGlow : theme.successGlow }]}>
+                      <Text style={[styles.statusBadgeText, { color: isOut ? theme.danger : isLow ? theme.warning : theme.success }]}>
+                        Stock: {item.stock_pieces}
+                      </Text>
+                    </View>
+                    <Text style={{ fontSize: 10, color: theme.textMuted, marginTop: 4, textAlign: 'center' }}>
+                      Min: {item.min_stock_pieces}
                     </Text>
                   </View>
-                </View>
 
-                {/* Quick Actions */}
-                <View style={styles.actions}>
-                  <TouchableOpacity
-                    style={[styles.stockAdjBtn, { backgroundColor: theme.surfaceElevated, borderColor: theme.border }]}
-                    onPress={() => { setSelectedProduct(item); setStockModalVisible(true); }}
-                    activeOpacity={0.7}
-                  >
-                    <Ionicons name="bar-chart" size={16} color={theme.accent} />
-                    <Text style={[styles.stockAdjText, { color: theme.textPrimary }]}>± Stock</Text>
-                  </TouchableOpacity>
+                  {/* Quick Actions */}
+                  <View style={styles.actions}>
+                    <TouchableOpacity
+                      style={[styles.stockAdjBtn, { backgroundColor: theme.surfaceElevated, borderColor: theme.border }]}
+                      onPress={() => { setSelectedProduct(item); setStockModalVisible(true); }}
+                      activeOpacity={0.7}
+                    >
+                      <Ionicons name="bar-chart" size={16} color={theme.textPrimary} />
+                    </TouchableOpacity>
 
-                  <TouchableOpacity onPress={() => { setSelectedProduct(item); setProductModalVisible(true); }} style={{ padding: 6 }}>
-                    <Ionicons name="create-outline" size={22} color={theme.accent} />
-                  </TouchableOpacity>
+                    <TouchableOpacity onPress={() => { setSelectedProduct(item); setProductModalVisible(true); }} style={styles.iconBtn}>
+                      <Ionicons name="create-outline" size={20} color={theme.accent} />
+                    </TouchableOpacity>
 
-                  <TouchableOpacity onPress={() => handleDelete(item.id, item.name)} style={{ padding: 6 }}>
-                    <Ionicons name="trash-outline" size={22} color={theme.danger} />
-                  </TouchableOpacity>
+                    <TouchableOpacity onPress={() => handleDelete(item.id, item.name)} style={styles.iconBtn}>
+                      <Ionicons name="trash-outline" size={20} color={theme.danger} />
+                    </TouchableOpacity>
+                  </View>
                 </View>
               </View>
             );
@@ -229,91 +206,34 @@ const styles = StyleSheet.create({
   topHeaderBar: {
     flexDirection: 'row',
     alignItems: 'center',
-    padding: 14,
+    padding: 12,
     borderRadius: 12,
     borderWidth: 1,
-    marginBottom: 14,
-    width: '100%',
+    marginBottom: 12,
   },
-  backArrowBtn: {
-    marginRight: 14,
-    padding: 4,
-  },
-  titleInfoGroup: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 12,
-    flex: 1,
-    marginRight: 16,
-  },
-  categoryIconBadge: { width: 42, height: 42, borderRadius: 10, justifyContent: 'center', alignItems: 'center' },
+  backArrowBtn: { marginRight: 12, padding: 4 },
+  titleInfoGroup: { flex: 1, flexDirection: 'row', alignItems: 'center' },
   textContainer: { flex: 1 },
-  categoryTitle: { fontSize: 16, fontWeight: 'bold' },
-  categorySub: { fontSize: 13, marginTop: 2 },
+  categoryTitle: { fontSize: 16, fontWeight: '800' },
+  categorySub: { fontSize: 12, fontWeight: '600' },
   
-  addProductBtn: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 8,
-    paddingHorizontal: 16,
-    paddingVertical: 12,
-    borderRadius: 10,
-    marginLeft: 'auto',
-  },
-  addProductBtnText: { color: '#ffffff', fontSize: 14, fontWeight: 'bold' },
+  addProductBtn: { flexDirection: 'row', alignItems: 'center', gap: 6, paddingHorizontal: 12, paddingVertical: 10, borderRadius: 8 },
+  addProductBtnText: { color: '#ffffff', fontSize: 13, fontWeight: '800' },
   
-  searchBar: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    height: 46,
-    borderRadius: 10,
-    borderWidth: 1,
-    paddingHorizontal: 14,
-    marginBottom: 14,
-  },
-  searchInput: { flex: 1, marginLeft: 10, fontSize: 14 },
+  searchBar: { flexDirection: 'row', alignItems: 'center', height: 46, borderRadius: 10, borderWidth: 1, paddingHorizontal: 14, marginBottom: 12 },
+  searchInput: { flex: 1, marginLeft: 10, fontSize: 15 },
   
-  emptyStateCard: {
-    flex: 1,
-    borderRadius: 12,
-    borderWidth: 1,
-    justifyContent: 'center',
-    alignItems: 'center',
-    gap: 10,
-    padding: 40,
-  },
-  emptyTitle: { fontSize: 16, fontWeight: 'bold' },
-  emptySub: { fontSize: 14, textAlign: 'center' },
+  emptyStateCard: { flex: 1, justifyContent: 'center', alignItems: 'center', gap: 12 },
+  emptyTitle: { fontSize: 16, fontWeight: '800' },
   
-  productCardRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    padding: 14,
-    borderRadius: 12,
-    borderWidth: 1,
-    marginBottom: 8,
-  },
-  prodName: { fontSize: 16, fontWeight: 'bold' },
-  prodMeta: { fontSize: 13, marginTop: 4 },
+  productCardRow: { padding: 14, borderRadius: 12, borderWidth: 1 },
+  prodName: { fontSize: 15, fontWeight: '800', marginBottom: 4 },
+  prodMeta: { fontSize: 13, fontWeight: '600' },
   
-  priceText: { fontSize: 14, fontWeight: 'bold' },
-  priceSubText: { fontSize: 12, marginTop: 4 },
+  statusBadge: { paddingHorizontal: 10, paddingVertical: 4, borderRadius: 8 },
+  statusBadgeText: { fontSize: 12, fontWeight: '800' },
   
-  marginBadge: { paddingHorizontal: 6, paddingVertical: 2, borderRadius: 6 },
-  marginText: { fontSize: 12, fontWeight: 'bold' },
-  
-  statusBadge: { paddingHorizontal: 12, paddingVertical: 6, borderRadius: 12 },
-  statusBadgeText: { fontSize: 12, fontWeight: 'bold' },
-  
-  actions: { flexDirection: 'row', alignItems: 'center', gap: 12 },
-  stockAdjBtn: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 6,
-    paddingHorizontal: 12,
-    paddingVertical: 8,
-    borderRadius: 8,
-    borderWidth: 1,
-  },
-  stockAdjText: { fontSize: 12, fontWeight: 'bold' },
+  actions: { flexDirection: 'row', alignItems: 'center', gap: 8 },
+  stockAdjBtn: { padding: 8, borderRadius: 8, borderWidth: 1 },
+  iconBtn: { padding: 8 },
 });

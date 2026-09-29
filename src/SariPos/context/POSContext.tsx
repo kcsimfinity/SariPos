@@ -1,8 +1,8 @@
-import React, { createContext, useContext, useState, useEffect } from 'react';
-import { Product, Category, CartItem, Sale, UnitType, StoreSettings } from '../types';
+import React, { createContext, useContext, useEffect, useState } from 'react';
+import { Alert } from 'react-native';
 import { dbService } from '../database/databaseService';
 import { initDatabase } from '../database/db';
-import { Alert } from 'react-native';
+import { CartItem, Category, Product, Sale, StoreSettings, UnitType } from '../types';
 
 interface POSContextType {
   products: Product[];
@@ -27,6 +27,13 @@ interface POSContextType {
   refreshCategories: () => Promise<void>;
   updateStoreSettings: (newSettings: StoreSettings) => Promise<void>;
   toggleTheme: () => Promise<void>;
+  lastTransactionTimestamp: number;
+  
+  // Cash Drawer
+  cashDrawerSession: any | null;
+  openCashDrawer: (amount: number) => Promise<void>;
+  closeCashDrawer: (expected: number, actual: number, variance: number) => Promise<void>;
+  addExpense: (type: 'EXPENSE' | 'WITHDRAWAL' | 'CASH_IN' | 'ADJUSTMENT', amount: number, description: string) => Promise<void>;
 }
 
 const defaultSettings: StoreSettings = {
@@ -38,7 +45,8 @@ const defaultSettings: StoreSettings = {
   currency_symbol: '₱',
   theme: 'dark',
   low_stock_threshold: '10',
-  tax_rate: '0'
+  tax_rate: '0',
+  default_opening_cash: '0'
 };
 
 const POSContext = createContext<POSContextType | undefined>(undefined);
@@ -52,18 +60,23 @@ export const POSProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   const [searchQuery, setSearchQuery] = useState('');
   const [transactionDiscount, setTransactionDiscount] = useState(0);
   const [isLoading, setIsLoading] = useState(true);
+  const [lastTransactionTimestamp, setLastTransactionTimestamp] = useState(Date.now());
+  
+  const [cashDrawerSession, setCashDrawerSession] = useState<any | null>(null);
 
   const loadData = async () => {
     try {
       setIsLoading(true);
       await initDatabase();
-      const [prods, cats, loadedSettings] = await Promise.all([
+      const [prods, cats, loadedSettings, cdSession] = await Promise.all([
         dbService.getProducts(),
         dbService.getCategories(),
-        dbService.getSettings()
+        dbService.getSettings(),
+        dbService.getCurrentCashDrawerSession()
       ]);
       setProducts(prods);
       setCategories(cats);
+      setCashDrawerSession(cdSession);
       // Only override defaults if the loaded settings object isn't empty
       if (loadedSettings && Object.keys(loadedSettings).length > 0) {
         setSettings(prev => ({ ...prev, ...loadedSettings }));
@@ -78,6 +91,24 @@ export const POSProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   useEffect(() => {
     loadData();
   }, []);
+
+  const openCashDrawer = async (amount: number) => {
+    await dbService.openCashDrawerSession(amount);
+    await loadData();
+  };
+
+  const closeCashDrawer = async (expected: number, actual: number, variance: number) => {
+    if (cashDrawerSession) {
+      await dbService.closeCashDrawerSession(cashDrawerSession.id, expected, actual, variance);
+      await loadData();
+    }
+  };
+
+  const addExpense = async (type: 'EXPENSE' | 'WITHDRAWAL' | 'CASH_IN' | 'ADJUSTMENT', amount: number, description: string) => {
+    await dbService.addStoreExpense(type, amount, description);
+    await loadData();
+    setLastTransactionTimestamp(Date.now());
+  };
 
   const updateStoreSettings = async (newSettings: StoreSettings) => {
     try {
@@ -95,6 +126,11 @@ export const POSProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   };
 
   const addToCart = (product: Product, unitType: UnitType) => {
+    if (!cashDrawerSession) {
+      Alert.alert('Shift Closed', 'Please open the Cash Drawer to start selling.');
+      return;
+    }
+
     const requiredPieces = unitType === 'PACK' ? product.pieces_per_pack : 1;
 
     const currentCartPieces = cart
@@ -182,10 +218,16 @@ export const POSProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     amountPaid: number, 
     customerName?: string
   ): Promise<Sale | null> => {
+    if (!cashDrawerSession) {
+      Alert.alert('Shift Closed', 'Please open the Cash Drawer to process sales.');
+      return null;
+    }
+
     try {
       const sale = await dbService.processSale(cart, transactionDiscount, paymentMethod, amountPaid, customerName);
       clearCart();
       await loadData();
+      setLastTransactionTimestamp(Date.now());
       return sale;
     } catch (err: any) {
       Alert.alert('Checkout Error', err.message || 'Transaction failed.');
@@ -216,7 +258,12 @@ export const POSProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         refreshInventory: loadData,
         refreshCategories: loadData,
         updateStoreSettings,
-        toggleTheme
+        toggleTheme,
+        lastTransactionTimestamp,
+        cashDrawerSession,
+        openCashDrawer,
+        closeCashDrawer,
+        addExpense
       }}
     >
       {children}

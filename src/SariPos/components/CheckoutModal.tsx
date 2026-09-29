@@ -1,19 +1,22 @@
-import React, { useState, useEffect } from 'react';
-import { 
-  View, 
-  Text, 
-  Modal, 
-  TextInput, 
-  TouchableOpacity, 
-  StyleSheet, 
-  Alert, 
-  ScrollView
+import { Ionicons } from '@expo/vector-icons';
+import React, { useEffect, useState } from 'react';
+import {
+    Alert,
+    KeyboardAvoidingView,
+    Modal,
+    Platform,
+    ScrollView,
+    StyleSheet,
+    Text,
+    TextInput,
+    TouchableOpacity,
+    useWindowDimensions,
+    View
 } from 'react-native';
 import { usePOS } from '../context/POSContext';
 import { dbService } from '../database/databaseService';
-import { Sale } from '../types';
-import { Ionicons } from '@expo/vector-icons';
 import { getTheme } from '../theme/theme';
+import { Sale } from '../types';
 
 interface Props {
   visible: boolean;
@@ -23,8 +26,9 @@ interface Props {
 }
 
 export const CheckoutModal: React.FC<Props> = ({ visible, totalAmount, onClose, onSuccess }) => {
-  const { checkout, settings } = usePOS();
+  const { checkout, settings, cart, transactionDiscount } = usePOS();
   const theme = getTheme(settings.theme === 'dark');
+  const { height } = useWindowDimensions();
 
   const [paymentMethod, setPaymentMethod] = useState<'CASH' | 'CREDIT'>('CASH');
   const [cashGiven, setCashGiven] = useState('');
@@ -36,7 +40,7 @@ export const CheckoutModal: React.FC<Props> = ({ visible, totalAmount, onClose, 
 
   useEffect(() => {
     if (visible) {
-      dbService.getUtangCustomers().then(list => setUtangCustomers(list || []));
+      dbService.getCustomers().then(list => setUtangCustomers(list || []));
     } else {
       setCashGiven('');
       setCustomerName('');
@@ -65,7 +69,7 @@ export const CheckoutModal: React.FC<Props> = ({ visible, totalAmount, onClose, 
       const initialPaid = parseFloat(downpayment) || 0;
       
       if (initialPaid >= totalAmount) {
-        Alert.alert('Invalid Downpayment', 'Downpayment cannot be equal to or greater than the total amount due. Process as a Cash payment instead.');
+        Alert.alert('Invalid Downpayment', 'Downpayment cannot be equal to or greater than the total amount due. Process as Cash instead.');
         return;
       }
 
@@ -87,211 +91,234 @@ export const CheckoutModal: React.FC<Props> = ({ visible, totalAmount, onClose, 
 
   const isDropdownVisible = showDropdown && filteredNames.length > 0;
 
+  // Derived order totals
+  const subtotal = cart.reduce((sum, i) => sum + (i.unitPrice * i.quantity), 0);
+  const itemDiscounts = cart.reduce((sum, i) => sum + (i.discount || 0), 0);
+  const totalDisc = itemDiscounts + (transactionDiscount || 0);
+
+  const fmt = (v: number) => v.toFixed(2);
   return (
     <Modal visible={visible} transparent animationType="fade" onRequestClose={onClose}>
-      <View style={styles.overlay}>
-        <View style={[styles.card, { backgroundColor: theme.surface, borderColor: theme.border }]}>
-          <View style={[styles.header, { borderBottomColor: theme.border }]}>
-            <Text style={[styles.title, { color: theme.textPrimary }]}>Complete Checkout</Text>
-            <TouchableOpacity onPress={onClose} style={styles.closeBtn} activeOpacity={0.7}>
-              <Ionicons name="close" size={24} color={theme.textSecondary} />
+      <KeyboardAvoidingView style={s.overlay} behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
+        <TouchableOpacity style={StyleSheet.absoluteFillObject} activeOpacity={1} onPress={onClose} />
+        
+        {/* Responsive Card constrained to 95% of available height */}
+        <View style={[s.card, { backgroundColor: theme.surface, maxHeight: height * 0.95 }]} onStartShouldSetResponder={() => true}>
+          
+          {/* HEADER (Always visible) */}
+          <View style={[s.header, { borderBottomColor: theme.border }]}>
+            <Text style={[s.title, { color: theme.textPrimary }]}>CHECKOUT</Text>
+            <TouchableOpacity onPress={onClose} style={s.closeBtn} activeOpacity={0.7}>
+              <Ionicons name="close" size={20} color={theme.textPrimary} />
             </TouchableOpacity>
           </View>
 
+          {/* CONTENT (Scrolls if too tall) */}
           <ScrollView 
-            contentContainerStyle={{ gap: 14, paddingVertical: 16 }} 
+            style={{ flexShrink: 1 }} 
+            contentContainerStyle={s.contentScroll} 
             showsVerticalScrollIndicator={false}
             keyboardShouldPersistTaps="handled"
           >
-            <View style={[styles.amountBanner, { backgroundColor: theme.bg, borderColor: theme.border }]}>
-              <Text style={[styles.amountLabel, { color: theme.textSecondary }]}>TOTAL AMOUNT DUE</Text>
-              <Text style={[styles.amountVal, { color: theme.success }]}>₱{totalAmount.toFixed(2)}</Text>
-            </View>
+            <View style={s.twoCol}>
+              
+              {/* LEFT COLUMN: Payment Logic */}
+              <View style={s.colLeft}>
+                <View>
+                  <Text style={[s.sectionLabel, { color: theme.textSecondary }]}>PAYMENT METHOD</Text>
+                  <View style={s.methodRow}>
+                    <TouchableOpacity
+                      style={[s.methodBtn, { backgroundColor: paymentMethod === 'CASH' ? theme.primary : theme.bg, borderColor: paymentMethod === 'CASH' ? theme.primary : theme.border }]}
+                      onPress={() => setPaymentMethod('CASH')}
+                      activeOpacity={0.8}
+                    >
+                      <Ionicons name="cash-outline" size={16} color={paymentMethod === 'CASH' ? '#fff' : theme.textPrimary} />
+                      <Text style={[s.methodText, { color: paymentMethod === 'CASH' ? '#fff' : theme.textPrimary }]}>Cash</Text>
+                    </TouchableOpacity>
+                    <TouchableOpacity
+                      style={[s.methodBtn, { backgroundColor: paymentMethod === 'CREDIT' ? theme.danger : theme.bg, borderColor: paymentMethod === 'CREDIT' ? theme.danger : theme.border }]}
+                      onPress={() => { setPaymentMethod('CREDIT'); setShowDropdown(false); }}
+                      activeOpacity={0.8}
+                    >
+                      <Ionicons name="book-outline" size={16} color={paymentMethod === 'CREDIT' ? '#fff' : theme.textPrimary} />
+                      <Text style={[s.methodText, { color: paymentMethod === 'CREDIT' ? '#fff' : theme.textPrimary }]}>Utang</Text>
+                    </TouchableOpacity>
+                  </View>
+                </View>
 
-            <Text style={[styles.fieldLabel, { color: theme.textSecondary }]}>SELECT PAYMENT METHOD</Text>
-            <View style={styles.methodRow}>
-              <TouchableOpacity
-                style={[
-                  styles.methodBtn,
-                  { backgroundColor: theme.bg, borderColor: theme.border },
-                  paymentMethod === 'CASH' && { backgroundColor: theme.primary, borderColor: theme.primary }
-                ]}
-                onPress={() => setPaymentMethod('CASH')}
-                activeOpacity={0.8}
-              >
-                <Ionicons name="cash-outline" size={20} color={paymentMethod === 'CASH' ? '#ffffff' : theme.textSecondary} />
-                <Text style={[styles.methodText, { color: paymentMethod === 'CASH' ? '#ffffff' : theme.textSecondary }]}>
-                  Cash Payment
-                </Text>
-              </TouchableOpacity>
+                {paymentMethod === 'CASH' ? (
+                  <View style={{ flexDirection: 'row', gap: 12 }}>
+                    <View style={{ flex: 1 }}>
+                      <Text style={[s.sectionLabel, { color: theme.textSecondary }]}>AMOUNT RECEIVED (₱)</Text>
+                      <View style={[s.inputBox, { backgroundColor: theme.bg, borderColor: theme.border }]}>
+                        <Text style={{ color: theme.textPrimary, fontSize: 16, marginRight: 6 }}>₱</Text>
+                        <TextInput
+                          style={[s.input, { color: theme.textPrimary }]}
+                          keyboardType="numeric"
+                          placeholder="0.00"
+                          placeholderTextColor={theme.textMuted}
+                          value={cashGiven}
+                          onChangeText={setCashGiven}
+                          autoFocus={true}
+                        />
+                      </View>
+                    </View>
+                    
+                    <View style={{ flex: 1 }}>
+                      <Text style={[s.sectionLabel, { color: theme.textSecondary }]}>CHANGE TO GIVE</Text>
+                      <View style={[s.changeBox, { backgroundColor: cashNum >= totalAmount ? theme.successGlow : theme.bg, borderColor: cashNum >= totalAmount ? theme.success : theme.border, borderWidth: StyleSheet.hairlineWidth }]}>
+                        <Text style={[s.changeVal, { color: cashNum >= totalAmount ? theme.success : theme.textMuted }]}>₱{fmt(changeVal)}</Text>
+                      </View>
+                    </View>
+                  </View>
+                ) : (
+                  <View style={{ gap: 12 }}>
+                    <View style={{ zIndex: 10 }}>
+                      <Text style={[s.sectionLabel, { color: theme.textSecondary }]}>BORROWER'S NAME</Text>
+                      <View style={[s.inputBox, { backgroundColor: theme.bg, borderColor: theme.border }]}>
+                        <TextInput
+                          style={[s.input, { color: theme.textPrimary }]}
+                          placeholder="e.g. Aling Nena"
+                          placeholderTextColor={theme.textMuted}
+                          value={customerName}
+                          onFocus={() => setShowDropdown(true)}
+                          onChangeText={text => { setCustomerName(text); setShowDropdown(true); }}
+                          autoFocus={true}
+                        />
+                      </View>
+                      
+                      {isDropdownVisible && (
+                        <View style={[s.dropdownContainer, { backgroundColor: theme.surfaceElevated, borderColor: theme.border }]}>
+                          {filteredNames.map((name, index) => (
+                            <TouchableOpacity
+                              key={name}
+                              style={[s.dropdownItem, { borderBottomColor: theme.border }, index === filteredNames.length - 1 && { borderBottomWidth: 0 }]}
+                              onPress={() => { setCustomerName(name); setShowDropdown(false); }}
+                            >
+                              <Ionicons name="person-circle-outline" size={16} color={theme.accent} />
+                              <Text style={[s.dropdownItemText, { color: theme.textPrimary }]}>{name}</Text>
+                            </TouchableOpacity>
+                          ))}
+                        </View>
+                      )}
+                    </View>
 
-              <TouchableOpacity
-                style={[
-                  styles.methodBtn,
-                  { backgroundColor: theme.bg, borderColor: theme.border },
-                  paymentMethod === 'CREDIT' && { backgroundColor: theme.danger, borderColor: theme.danger }
-                ]}
-                onPress={() => {
-                  setPaymentMethod('CREDIT');
-                  setShowDropdown(false);
-                }}
-                activeOpacity={0.8}
-              >
-                <Ionicons name="book-outline" size={20} color={paymentMethod === 'CREDIT' ? '#ffffff' : theme.textSecondary} />
-                <Text style={[styles.methodText, { color: paymentMethod === 'CREDIT' ? '#ffffff' : theme.textSecondary }]}>
-                  Utang / Credit
-                </Text>
-              </TouchableOpacity>
-            </View>
+                    <View>
+                      <Text style={[s.sectionLabel, { color: theme.textSecondary }]}>DOWNPAYMENT (OPTIONAL) ₱</Text>
+                      <View style={[s.inputBox, { backgroundColor: theme.bg, borderColor: theme.border }]}>
+                        <Text style={{ color: theme.textPrimary, fontSize: 16, marginRight: 6 }}>₱</Text>
+                        <TextInput
+                          style={[s.input, { color: theme.textPrimary }]}
+                          keyboardType="numeric"
+                          placeholder="0.00"
+                          placeholderTextColor={theme.textMuted}
+                          value={downpayment}
+                          onFocus={() => setShowDropdown(false)}
+                          onChangeText={setDownpayment}
+                        />
+                      </View>
+                    </View>
 
-            {paymentMethod === 'CASH' ? (
-              <View style={styles.inputGroup}>
-                <Text style={[styles.fieldLabel, { color: theme.textSecondary }]}>CASH RECEIVED (₱) *</Text>
-                <TextInput
-                  style={[styles.bigInput, { backgroundColor: theme.bg, color: theme.textPrimary, borderColor: theme.border }]}
-                  keyboardType="numeric"
-                  placeholder="e.g. 500"
-                  placeholderTextColor={theme.textMuted}
-                  value={cashGiven}
-                  onChangeText={setCashGiven}
-                />
-                {cashNum >= totalAmount && (
-                  <View style={[styles.changeBox, { backgroundColor: theme.successGlow }]}>
-                    <Text style={[styles.changeLabel, { color: theme.success }]}>CHANGE TO GIVE:</Text>
-                    <Text style={[styles.changeVal, { color: theme.success }]}>₱{changeVal.toFixed(2)}</Text>
+                    {dpNum > 0 && (
+                      <View style={[s.changeBox, { backgroundColor: theme.dangerGlow, padding: 8 }]}>
+                        <Text style={[s.changeLabel, { color: theme.danger }]}>ADDED TO UTANG</Text>
+                        <Text style={[s.changeVal, { color: theme.danger, fontSize: 16 }]}>₱{fmt(utangAdded)}</Text>
+                      </View>
+                    )}
                   </View>
                 )}
               </View>
-            ) : (
-              <View style={styles.inputGroup}>
-                <View style={{ marginBottom: 4, zIndex: 10 }}>
-                  <Text style={[styles.fieldLabel, { color: theme.textSecondary }]}>BORROWER'S NAME (UTANG CUSTOMER) *</Text>
-                  <TextInput
-                    style={[styles.bigInput, { backgroundColor: theme.bg, color: theme.textPrimary, borderColor: theme.border }]}
-                    placeholder="e.g. Aling Nena, Pareng Boy"
-                    placeholderTextColor={theme.textMuted}
-                    value={customerName}
-                    onFocus={() => setShowDropdown(true)}
-                    onChangeText={text => {
-                      setCustomerName(text);
-                      setShowDropdown(true);
-                    }}
-                  />
-                  
-                  {isDropdownVisible && (
-                    <View style={[styles.dropdownContainer, { backgroundColor: theme.surfaceElevated, borderColor: theme.border }]}>
-                      <ScrollView style={{ maxHeight: 150 }} keyboardShouldPersistTaps="handled" nestedScrollEnabled>
-                        {filteredNames.map((name, index) => (
-                          <TouchableOpacity
-                            key={name}
-                            style={[
-                              styles.dropdownItem,
-                              { borderBottomColor: theme.border },
-                              index === filteredNames.length - 1 && { borderBottomWidth: 0 }
-                            ]}
-                            onPress={() => {
-                              setCustomerName(name);
-                              setShowDropdown(false);
-                            }}
-                          >
-                            <Ionicons name="person-circle-outline" size={16} color={theme.accent} />
-                            <Text style={[styles.dropdownItemText, { color: theme.textPrimary }]}>{name}</Text>
-                          </TouchableOpacity>
-                        ))}
-                      </ScrollView>
+
+              {/* RIGHT COLUMN: Order Summary */}
+              <View style={s.colRight}>
+                <Text style={[s.sectionLabel, { color: theme.textSecondary }]}>ORDER SUMMARY</Text>
+                
+                <View style={[s.cartBox, { borderColor: theme.border }]}>
+                  {cart.map(item => (
+                    <View key={item.id} style={s.cartRow}>
+                      <Text numberOfLines={1} style={[s.cartText, { color: theme.textPrimary }]}>
+                        {item.product.name} <Text style={{ color: theme.textMuted }}>x{item.quantity}</Text>
+                      </Text>
+                      <Text style={[s.cartPrice, { color: theme.textPrimary }]}>₱{fmt(item.unitPrice * item.quantity)}</Text>
                     </View>
-                  )}
+                  ))}
+                  {cart.length === 0 && <Text style={{ color: theme.textMuted, fontSize: 12, textAlign: 'center' }}>Cart is empty</Text>}
                 </View>
 
-                <View style={{ marginBottom: 8, zIndex: 1 }}>
-                  <Text style={[styles.fieldLabel, { color: theme.textSecondary }]}>PARTIAL DOWNPAYMENT (OPTIONAL) ₱</Text>
-                  <TextInput
-                    style={[styles.input, { backgroundColor: theme.bg, color: theme.textPrimary, borderColor: theme.border }]}
-                    keyboardType="numeric"
-                    placeholder="0.00"
-                    placeholderTextColor={theme.textMuted}
-                    value={downpayment}
-                    onFocus={() => setShowDropdown(false)}
-                    onChangeText={setDownpayment}
-                  />
-                </View>
-
-                <View style={[styles.utangSummaryBox, { backgroundColor: theme.dangerGlow, borderColor: theme.danger, zIndex: 1 }]}>
-                  <Text style={[styles.utangSummaryText, { color: theme.danger }]}>
-                    Amount Added to Utang: ₱{utangAdded.toFixed(2)}
-                  </Text>
+                <View style={[s.totalsBox, { borderColor: theme.border, backgroundColor: theme.bg }]}>
+                  <View style={s.totalsRow}><Text style={[s.totalsLabel, { color: theme.textSecondary }]}>Subtotal</Text><Text style={[s.totalsVal, { color: theme.textPrimary }]}>₱{fmt(subtotal)}</Text></View>
+                  <View style={s.totalsRow}><Text style={[s.totalsLabel, { color: theme.textSecondary }]}>Discount</Text><Text style={[s.totalsVal, { color: theme.warning }]}>-₱{fmt(totalDisc)}</Text></View>
+                  <View style={[s.divider, { backgroundColor: theme.border }]} />
+                  <View style={[s.totalsRow, { marginBottom: 0 }]}><Text style={[s.totalText, { color: theme.textPrimary }]}>TOTAL</Text><Text style={[s.totalAmount, { color: theme.success }]}>₱{fmt(totalAmount)}</Text></View>
                 </View>
               </View>
-            )}
+            </View>
           </ScrollView>
 
-          <View style={[styles.actionRow, { borderTopColor: theme.border }]}>
-            <TouchableOpacity style={[styles.cancelBtn, { backgroundColor: theme.surfaceElevated, borderColor: theme.border }]} onPress={onClose} activeOpacity={0.7}>
-              <Text style={[styles.cancelText, { color: theme.textPrimary }]}>Cancel</Text>
+          {/* FOOTER (Always visible) */}
+          <View style={[s.footer, { borderTopColor: theme.border }]}>
+            <TouchableOpacity style={[s.cancelBtn, { borderColor: theme.border, backgroundColor: theme.surfaceElevated }]} onPress={onClose} activeOpacity={0.7}>
+              <Text style={[s.cancelText, { color: theme.textPrimary }]}>Cancel</Text>
             </TouchableOpacity>
-            <TouchableOpacity style={[styles.confirmBtn, { backgroundColor: paymentMethod === 'CASH' ? theme.primary : theme.danger }]} onPress={handleSubmit} activeOpacity={0.8}>
-              <Ionicons name="checkmark-circle" size={18} color="#ffffff" />
-              <Text style={styles.confirmText}>
-                {paymentMethod === 'CASH' ? 'Complete Sale' : 'Record Utang'}
+            <TouchableOpacity style={[s.confirmBtn, { backgroundColor: paymentMethod === 'CASH' ? theme.primary : theme.danger }]} onPress={handleSubmit} activeOpacity={0.8}>
+              <Ionicons name="checkmark-circle" size={16} color="#ffffff" />
+              <Text style={s.confirmText}>
+                {paymentMethod === 'CASH' ? 'Complete Sale' : 'Save Utang'}
               </Text>
             </TouchableOpacity>
           </View>
+
         </View>
-      </View>
+      </KeyboardAvoidingView>
     </Modal>
   );
 };
-
-const styles = StyleSheet.create({
-  overlay: { flex: 1, backgroundColor: 'rgba(0,0,0,0.75)', justifyContent: 'center', alignItems: 'center', padding: 24 },
-  card: { width: '90%', maxWidth: 640, borderRadius: 16, borderWidth: 1, padding: 20, maxHeight: '90%' },
-  header: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', paddingBottom: 14, borderBottomWidth: 1 },
-  title: { fontSize: 16, fontWeight: 'bold' },
-  closeBtn: { padding: 4 },
-  amountBanner: { paddingVertical: 16, borderRadius: 12, borderWidth: 1, alignItems: 'center' },
-  amountLabel: { fontSize: 12, fontWeight: 'bold' },
-  amountVal: { fontSize: 18, fontWeight: 'bold', marginTop: 4 },
-  fieldLabel: { fontSize: 12, fontWeight: 'bold', marginBottom: 6 },
-  methodRow: { flexDirection: 'row', gap: 12 },
-  methodBtn: { flex: 1, flexDirection: 'row', justifyContent: 'center', alignItems: 'center', gap: 8, paddingVertical: 14, borderRadius: 10, borderWidth: 1 },
-  methodText: { fontWeight: 'bold', fontSize: 14 },
-  inputGroup: { gap: 10, marginTop: 6 },
-  bigInput: { paddingHorizontal: 16, paddingVertical: 14, borderRadius: 10, borderWidth: 1, fontSize: 14, fontWeight: 'bold' },
-  input: { paddingHorizontal: 16, paddingVertical: 12, borderRadius: 10, borderWidth: 1, fontSize: 14 },
+const s = StyleSheet.create({
+  overlay: { flex: 1, backgroundColor: 'rgba(0,0,0,0.6)', justifyContent: 'center', alignItems: 'center', padding: 10 },
+  card: { width: '100%', maxWidth: 700, borderRadius: 12, elevation: 10, shadowColor: '#000', shadowOffset: { width: 0, height: 4 }, shadowOpacity: 0.1, shadowRadius: 8, overflow: 'hidden' },
   
-  // New Dropdown Styles
-  dropdownContainer: {
-    marginTop: 4,
-    borderRadius: 8,
-    borderWidth: 1,
-    overflow: 'hidden',
-    elevation: 3,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.15,
-    shadowRadius: 4,
-  },
-  dropdownItem: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 8,
-    paddingHorizontal: 14,
-    paddingVertical: 12,
-    borderBottomWidth: 1,
-  },
-  dropdownItemText: {
-    fontSize: 14,
-    fontWeight: 'bold',
-  },
-
-  changeBox: { paddingVertical: 14, borderRadius: 10, alignItems: 'center', marginTop: 6 },
-  changeLabel: { fontSize: 12, fontWeight: 'bold' },
-  changeVal: { fontSize: 16, fontWeight: 'bold', marginTop: 4 },
-  utangSummaryBox: { paddingVertical: 14, borderRadius: 10, borderWidth: 1, alignItems: 'center', marginTop: 6 },
-  utangSummaryText: { fontSize: 14, fontWeight: 'bold' },
-  actionRow: { flexDirection: 'row', gap: 12, paddingTop: 16, borderTopWidth: 1 },
-  cancelBtn: { flex: 1, paddingVertical: 14, borderRadius: 10, borderWidth: 1, justifyContent: 'center', alignItems: 'center' },
-  cancelText: { fontWeight: 'bold', fontSize: 14, textAlign: 'center' },
-  confirmBtn: { flex: 2, paddingVertical: 14, borderRadius: 10, flexDirection: 'row', justifyContent: 'center', alignItems: 'center', gap: 8 },
-  confirmText: { color: '#ffffff', fontWeight: 'bold', fontSize: 14, textAlign: 'center' },
+  header: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', padding: 16, borderBottomWidth: StyleSheet.hairlineWidth },
+  title: { fontSize: 16, fontWeight: '800', letterSpacing: 0.5 },
+  closeBtn: { padding: 4 },
+  
+  contentScroll: { padding: 16 },
+  twoCol: { flexDirection: 'row', gap: 24 },
+  colLeft: { flex: 1.2, gap: 16 },
+  colRight: { flex: 1, gap: 12 },
+  
+  sectionLabel: { fontSize: 10, fontWeight: '800', letterSpacing: 0.5, marginBottom: 8 },
+  
+  methodRow: { flexDirection: 'row', gap: 12 },
+  methodBtn: { flex: 1, flexDirection: 'row', justifyContent: 'center', alignItems: 'center', gap: 6, height: 40, borderRadius: 8, borderWidth: 1 },
+  methodText: { fontWeight: '700', fontSize: 13 },
+  
+  inputBox: { height: 44, paddingHorizontal: 12, borderRadius: 8, borderWidth: 1, flexDirection: 'row', alignItems: 'center' },
+  input: { flex: 1, fontSize: 15, fontWeight: '700', padding: 0 },
+  
+  dropdownContainer: { position: 'absolute', top: 68, left: 0, right: 0, borderRadius: 8, borderWidth: 1, zIndex: 100, elevation: 4 },
+  dropdownItem: { flexDirection: 'row', alignItems: 'center', gap: 8, paddingHorizontal: 12, paddingVertical: 10, borderBottomWidth: StyleSheet.hairlineWidth },
+  dropdownItemText: { fontSize: 14, fontWeight: '600' },
+  
+  changeBox: { padding: 12, borderRadius: 8, alignItems: 'center', marginTop: 4 },
+  changeLabel: { fontSize: 10, fontWeight: '800', letterSpacing: 0.5 },
+  changeVal: { fontSize: 20, fontWeight: '900', marginTop: 2 },
+  
+  cartBox: { borderRadius: 8, borderWidth: 1, padding: 10, gap: 8 },
+  cartRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' },
+  cartText: { fontSize: 13, fontWeight: '600', flex: 1, paddingRight: 8 },
+  cartPrice: { fontSize: 13, fontWeight: '700' },
+  
+  totalsBox: { padding: 12, borderRadius: 8, borderWidth: 1 },
+  totalsRow: { flexDirection: 'row', justifyContent: 'space-between', marginBottom: 6 },
+  totalsLabel: { fontSize: 12, fontWeight: '600' },
+  totalsVal: { fontSize: 13, fontWeight: '700' },
+  divider: { height: StyleSheet.hairlineWidth, marginVertical: 8 },
+  totalText: { fontSize: 14, fontWeight: '900' },
+  totalAmount: { fontSize: 18, fontWeight: '900' },
+  
+  footer: { flexDirection: 'row', gap: 12, padding: 16, borderTopWidth: StyleSheet.hairlineWidth },
+  cancelBtn: { flex: 1, height: 44, borderRadius: 8, borderWidth: 1, justifyContent: 'center', alignItems: 'center' },
+  cancelText: { fontWeight: '700', fontSize: 13 },
+  confirmBtn: { flex: 2, height: 44, borderRadius: 8, flexDirection: 'row', justifyContent: 'center', alignItems: 'center', gap: 6 },
+  confirmText: { color: '#ffffff', fontWeight: '800', fontSize: 13 },
 });

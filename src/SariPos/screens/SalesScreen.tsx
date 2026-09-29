@@ -1,301 +1,515 @@
-import React, { useState, useEffect, useCallback } from 'react';
-import {
-  View,
-  Text,
-  FlatList,
-  StyleSheet,
-  TouchableOpacity,
-  ActivityIndicator,
-  Modal,
-  ScrollView
-} from 'react-native';
-import { dbService } from '../database/databaseService';
-import { Sale } from '../types';
-import { usePOS } from '../context/POSContext';
-import { getTheme } from '../theme/theme';
 import { Ionicons } from '@expo/vector-icons';
-import { useFocusEffect } from '@react-navigation/native'; // Auto-Refresh Trigger
+import React, { useState } from 'react';
+import {
+  FlatList,
+  Modal,
+  SafeAreaView,
+  StyleSheet,
+  Text,
+  TextInput,
+  TouchableOpacity,
+  useWindowDimensions,
+  View
+} from 'react-native';
+import { usePOS } from '../context/POSContext';
+import { dbService } from '../database/databaseService';
+import { getTheme } from '../theme/theme';
+import { Sale } from '../types';
+
+const fmt = (val: any): string => {
+  const n = Number(val);
+  return isNaN(n) ? '0.00' : n.toFixed(2);
+};
+
+const fmtTime = (iso: string) =>
+  new Date(iso).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+
+const fmtDateDisplay = (d: Date) =>
+  d.toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric', year: 'numeric' });
 
 export const SalesScreen: React.FC = () => {
-  const { settings } = usePOS();
+  const { settings, lastTransactionTimestamp } = usePOS();
   const theme = getTheme(settings.theme === 'dark');
+  const { width, height } = useWindowDimensions();
+  const isLandscape = width > height;
 
   const [selectedDate, setSelectedDate] = useState<Date>(new Date());
-  const [showDatePickerModal, setShowDatePickerModal] = useState(false);
-
-  const [pickerYear, setPickerYear] = useState(selectedDate.getFullYear());
-  const [pickerMonth, setPickerMonth] = useState(selectedDate.getMonth());
-
   const [summary, setSummary] = useState<any>(null);
   const [sales, setSales] = useState<Sale[]>([]);
   const [loading, setLoading] = useState(true);
 
-  const yearStr = selectedDate.getFullYear();
-  const monthStr = String(selectedDate.getMonth() + 1).padStart(2, '0');
-  const dayStr = String(selectedDate.getDate()).padStart(2, '0');
-  const dateStr = `${yearStr}-${monthStr}-${dayStr}`;
+  // Accordion state
+  const [expandedSaleId, setExpandedSaleId] = useState<string | null>(null);
 
-  const loadSalesData = async () => {
+  // Filter & Search
+  const [searchQuery, setSearchQuery] = useState('');
+  const [filterMethod, setFilterMethod] = useState<'ALL' | 'CASH' | 'CREDIT' | 'UTANG_PAYMENT'>('ALL');
+  const [filterModalVisible, setFilterModalVisible] = useState(false);
+
+  // Date Picker Modal State
+  const [dateModalVisible, setDateModalVisible] = useState(false);
+  const [tempDate, setTempDate] = useState<Date>(new Date());
+
+  const dateStr = [
+    selectedDate.getFullYear(),
+    String(selectedDate.getMonth() + 1).padStart(2, '0'),
+    String(selectedDate.getDate()).padStart(2, '0'),
+  ].join('-');
+
+  const loadData = async () => {
     setLoading(true);
     try {
-      const [sum, history] = await Promise.all([
+      const [sum, hist] = await Promise.all([
         dbService.getSummaryByDate(dateStr),
-        dbService.getSalesByDate(dateStr)
+        dbService.getSalesByDate(dateStr),
       ]);
-      setSummary(sum || {});
-      setSales(history || []);
-    } catch (err) {
-      console.error('Failed to load sales summary for date:', dateStr, err);
+      setSummary(sum ?? {});
+      setSales(hist ?? []);
+    } catch (e) {
+      console.error('SalesScreen load error:', e);
     } finally {
       setLoading(false);
     }
   };
 
-  // Automatically refresh when you switch back to this tab
-  useFocusEffect(
-    useCallback(() => {
-      loadSalesData();
-    }, [dateStr])
+  React.useEffect(() => { loadData(); }, [dateStr, lastTransactionTimestamp]);
+
+  const changeDate = (days: number) => {
+    const next = new Date(selectedDate);
+    next.setDate(selectedDate.getDate() + days);
+    if (next <= new Date()) setSelectedDate(next);
+  };
+
+  const handleApplyDate = (d: Date) => {
+    if (d <= new Date()) {
+      setSelectedDate(d);
+    }
+    setDateModalVisible(false);
+  };
+
+  const filteredSales = sales.filter(s => {
+    if (filterMethod !== 'ALL' && s.payment_method !== filterMethod) {
+      return false;
+    }
+    if (searchQuery) {
+      const q = searchQuery.toLowerCase();
+      const matchTx = s.transaction_no?.toLowerCase().includes(q);
+      const matchCust = s.customer_name?.toLowerCase().includes(q);
+      const matchItems = s.items?.some(i => i.product_name?.toLowerCase().includes(q));
+      if (!matchTx && !matchCust && !matchItems) {
+        return false;
+      }
+    }
+    return true;
+  });
+
+  const toggleExpand = (id: string) => {
+    setExpandedSaleId(prev => (prev === id ? null : id));
+  };
+
+  // ---------------------------------------------------------------------------
+  // SIDE SUMMARY
+  // ---------------------------------------------------------------------------
+  const SummaryView = () => (
+    <View style={[isLandscape ? s.sideSummaryLandscape : s.sideSummaryPortrait]}>
+      {/* 1. SALES SUMMARY */}
+      <View style={[s.summaryBox, { backgroundColor: theme.surface, borderColor: theme.border }]}>
+        <Text style={[s.summarySectionTitle, { color: theme.textSecondary }]}>SALES SUMMARY</Text>
+        <View style={s.summaryRow}>
+          <Text style={[s.summaryLabel, { color: theme.textSecondary }]}>Gross Sales</Text>
+          <Text style={[s.summaryValue, { color: theme.textPrimary }]}>₱{fmt(summary?.grossSales)}</Text>
+        </View>
+        <View style={s.summaryRow}>
+          <Text style={[s.summaryLabel, { color: theme.textSecondary }]}>Discounts</Text>
+          <Text style={[s.summaryValue, { color: theme.warning }]}>-₱{fmt(summary?.discounts)}</Text>
+        </View>
+        <View style={[s.summaryRow, s.summaryDivider, { borderTopColor: theme.border }]}>
+          <Text style={[s.summaryLabelBold, { color: theme.textPrimary }]}>Net Sales</Text>
+          <Text style={[s.summaryValueBold, { color: theme.textPrimary }]}>₱{fmt(summary?.netSales)}</Text>
+        </View>
+        <View style={s.summaryRow}>
+          <Text style={[s.summaryLabel, { color: theme.textSecondary }]}>COGS</Text>
+          <Text style={[s.summaryValue, { color: theme.textSecondary }]}>₱{fmt(summary?.cogs)}</Text>
+        </View>
+        <View style={s.summaryRow}>
+          <Text style={[s.summaryLabelBold, { color: theme.success }]}>Gross Profit</Text>
+          <Text style={[s.summaryValueBold, { color: theme.success }]}>₱{fmt(summary?.grossProfit)}</Text>
+        </View>
+      </View>
+
+      {/* 2. CASH & CREDIT */}
+      <View style={[s.summaryBox, { backgroundColor: theme.surface, borderColor: theme.border }]}>
+        <Text style={[s.summarySectionTitle, { color: theme.textSecondary }]}>CASH & CREDIT</Text>
+        <View style={s.summaryRow}>
+          <Text style={[s.summaryLabelBold, { color: theme.textPrimary }]}>Cash Sales</Text>
+          <Text style={[s.summaryValueBold, { color: theme.textPrimary }]}>₱{fmt(summary?.cashSales)}</Text>
+        </View>
+        <View style={s.summaryRow}>
+          <Text style={[s.summaryLabel, { color: theme.danger }]}>Utang Sales</Text>
+          <Text style={[s.summaryValue, { color: theme.danger }]}>₱{fmt(summary?.utangSales)}</Text>
+        </View>
+        <View style={[s.summaryRow, { marginTop: 8 }]}>
+          <Text style={[s.summaryLabel, { color: theme.accent }]}>Utang Payments</Text>
+          <Text style={[s.summaryValue, { color: theme.accent }]}>₱{fmt(summary?.utangPayments)}</Text>
+        </View>
+      </View>
+    </View>
   );
 
-  const handleOpenPicker = () => {
-    setPickerYear(selectedDate.getFullYear());
-    setPickerMonth(selectedDate.getMonth());
-    setShowDatePickerModal(true);
-  };
+  // ---------------------------------------------------------------------------
+  // LIST HEADER
+  // ---------------------------------------------------------------------------
+  const ListHeader = () => (
+    <View style={s.headerContainer}>
+      <View style={s.headerControls}>
+        <View style={[s.dateNav, { backgroundColor: theme.surface, borderColor: theme.border }]}>
+          <TouchableOpacity style={s.dateNavBtn} onPress={() => changeDate(-1)}>
+            <Ionicons name="chevron-back" size={20} color={theme.textPrimary} />
+          </TouchableOpacity>
+          <TouchableOpacity 
+            style={s.dateNavCenter} 
+            activeOpacity={0.7} 
+            onPress={() => { setTempDate(selectedDate); setDateModalVisible(true); }}
+          >
+            <Ionicons name="calendar-outline" size={16} color={theme.accent} />
+            <Text style={[s.dateNavText, { color: theme.textPrimary }]}>{fmtDateDisplay(selectedDate)}</Text>
+          </TouchableOpacity>
+          <TouchableOpacity style={s.dateNavBtn} onPress={() => changeDate(1)}>
+            <Ionicons name="chevron-forward" size={20} color={theme.textPrimary} />
+          </TouchableOpacity>
+        </View>
+      </View>
 
-  const handleSelectDay = (dayNum: number) => {
-    const chosen = new Date(pickerYear, pickerMonth, dayNum);
-    const today = new Date();
-    if (chosen > today) setSelectedDate(today);
-    else setSelectedDate(chosen);
-    setShowDatePickerModal(false);
-  };
+      {!isLandscape && <SummaryView />}
 
-  const formatMoney = (val: any): string => {
-    const num = Number(val);
-    return isNaN(num) ? '0.00' : num.toFixed(2);
-  };
-
-  const formatDateDisplay = (d: Date) => {
-    return d.toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric', year: 'numeric' });
-  };
-
-  const months = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'];
-  const weekdays = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
-  const daysInMonth = new Date(pickerYear, pickerMonth + 1, 0).getDate();
-  const firstDayOfWeek = new Date(pickerYear, pickerMonth, 1).getDay();
-
-  return (
-    <View style={[styles.container, { backgroundColor: theme.bg }]}>
-      
-      {/* CENTERED TAPPABLE DATE BAR */}
-      <View style={styles.dateBarWrapper}>
-        <TouchableOpacity style={[styles.datePickerBtn, { backgroundColor: theme.surface, borderColor: theme.border }]} onPress={handleOpenPicker} activeOpacity={0.75}>
-          <Ionicons name="calendar" size={16} color={theme.accent} />
-          <Text style={[styles.datePickerText, { color: theme.textPrimary }]}>{formatDateDisplay(selectedDate)}</Text>
-          <Ionicons name="chevron-down" size={16} color={theme.textSecondary} />
+      <View style={s.searchFilterRow}>
+        <View style={[s.searchBar, { backgroundColor: theme.surface, borderColor: theme.border }]}>
+          <Ionicons name="search" size={16} color={theme.textMuted} />
+          <TextInput
+            style={[s.searchInput, { color: theme.textPrimary }]}
+            placeholder="Search transaction, product, customer..."
+            placeholderTextColor={theme.textMuted}
+            value={searchQuery}
+            onChangeText={setSearchQuery}
+          />
+          {searchQuery !== '' && (
+            <TouchableOpacity onPress={() => setSearchQuery('')} style={{ padding: 4 }}>
+              <Ionicons name="close-circle" size={16} color={theme.textMuted} />
+            </TouchableOpacity>
+          )}
+        </View>
+        
+        <TouchableOpacity 
+          style={[s.filterBtn, { backgroundColor: filterMethod !== 'ALL' ? theme.primary : theme.surface, borderColor: filterMethod !== 'ALL' ? theme.primary : theme.border }]} 
+          onPress={() => setFilterModalVisible(true)}
+        >
+          <Ionicons name="filter" size={18} color={filterMethod !== 'ALL' ? '#fff' : theme.textPrimary} />
+          <Text style={[{ fontSize: 13, fontWeight: '700', marginLeft: 4, color: filterMethod !== 'ALL' ? '#fff' : theme.textPrimary }]}>
+            {filterMethod === 'ALL' ? 'Filter' : filterMethod === 'CREDIT' ? 'Utang' : filterMethod === 'UTANG_PAYMENT' ? 'Payment' : 'Cash'}
+          </Text>
         </TouchableOpacity>
       </View>
 
-      {/* 3-METRIC SUMMARY BANNER */}
-      <View style={styles.metricsRow}>
-        <View style={[styles.metricCard, { backgroundColor: theme.surface, borderColor: theme.border }]}>
-          <View style={styles.metricHeader}>
-            <Ionicons name="cash-outline" size={14} color={theme.textSecondary} />
-            <Text style={[styles.metricLabel, { color: theme.textSecondary }]}>Gross Sales</Text>
-          </View>
-          <Text style={[styles.metricVal, { color: theme.textPrimary }]}>₱{formatMoney(summary?.grossSales)}</Text>
-        </View>
+      <Text style={[s.txCount, { color: theme.textSecondary }]}>
+        {filteredSales.length} TRANSACTIONS
+      </Text>
+    </View>
+  );
 
-        <View style={[styles.metricCard, { backgroundColor: theme.surface, borderColor: theme.border }]}>
-          <View style={styles.metricHeader}>
-            <Ionicons name="receipt-outline" size={14} color={theme.textSecondary} />
-            <Text style={[styles.metricLabel, { color: theme.textSecondary }]}>COGS (Cost)</Text>
-          </View>
-          <Text style={[styles.metricVal, { color: theme.textPrimary }]}>₱{formatMoney(summary?.cogs)}</Text>
-        </View>
-
-        <View style={[styles.metricCard, { backgroundColor: theme.surface, borderColor: theme.success }]}>
-          <View style={styles.metricHeader}>
-            <Ionicons name="trending-up-outline" size={14} color={theme.success} />
-            <Text style={[styles.metricLabel, { color: theme.textSecondary }]}>Gross Profit</Text>
-          </View>
-          <Text style={[styles.metricVal, { color: theme.success }]}>₱{formatMoney(summary?.grossProfit)}</Text>
-        </View>
-      </View>
-
-      {/* TRANSACTION HISTORY */}
-      <View style={styles.historyContainer}>
-        <View style={styles.historyHeaderRow}>
-          <View>
-            <Text style={[styles.sectionTitle, { color: theme.textPrimary }]}>
-              Transaction History ({sales.length})
-            </Text>
-            <Text style={[styles.sectionSub, { color: theme.textSecondary }]}>
-              {summary?.txCount || 0} Txns • {summary?.totalItemsSold || 0} Items
-            </Text>
-          </View>
-          <TouchableOpacity onPress={loadSalesData} style={{ padding: 4 }}>
-            <Ionicons name="refresh" size={18} color={theme.accent} />
-          </TouchableOpacity>
-        </View>
-
-        {loading ? (
-          <View style={styles.loadingBox}>
-            <ActivityIndicator size="small" color={theme.primary} />
-            <Text style={[styles.loadingText, { color: theme.textSecondary }]}>Loading Transactions...</Text>
-          </View>
-        ) : sales.length === 0 ? (
-          <View style={[styles.emptyCard, { backgroundColor: theme.surface, borderColor: theme.border }]}>
-            <Ionicons name="receipt-outline" size={32} color={theme.textMuted} />
-            <Text style={[styles.emptyTitle, { color: theme.textPrimary }]}>No transactions found</Text>
-            <Text style={[styles.emptySub, { color: theme.textSecondary }]}>
-              There were no POS checkout sales recorded on {formatDateDisplay(selectedDate)}.
-            </Text>
-          </View>
-        ) : (
+  return (
+    <SafeAreaView style={[s.root, { backgroundColor: theme.bg }]}>
+      <View style={[s.mainLayout, isLandscape && { flexDirection: 'row' }]}>
+        <View style={isLandscape ? s.mainColumn : { flex: 1 }}>
           <FlatList
-            data={sales}
+            data={filteredSales}
             keyExtractor={item => item.id}
+            ListHeaderComponent={<ListHeader />}
+            contentContainerStyle={s.listContent}
             showsVerticalScrollIndicator={false}
-            contentContainerStyle={{ paddingBottom: 24 }}
             refreshing={loading}
-            onRefresh={loadSalesData}
+            onRefresh={loadData}
+            ListEmptyComponent={
+              !loading ? (
+                <View style={s.empty}>
+                  <Ionicons name="receipt-outline" size={48} color={theme.textMuted} />
+                  <Text style={[s.emptyTitle, { color: theme.textPrimary }]}>No transactions found</Text>
+                </View>
+              ) : null
+            }
             renderItem={({ item }) => {
-              const totalDiscount = (item.item_discounts || 0) + (item.transaction_discount || 0);
+              const isPayment = item.payment_method === 'UTANG_PAYMENT';
+              const isCredit  = item.payment_method === 'CREDIT';
+              const isExpanded = expandedSaleId === item.id;
+              
+              let icon = 'cash-outline';
+              let color = theme.success;
+              let methodLabel = 'CASH';
+              
+              if (isPayment) {
+                icon = 'log-in-outline';
+                color = theme.accent;
+                methodLabel = 'PAYMENT';
+              } else if (isCredit) {
+                icon = 'book-outline';
+                color = theme.danger;
+                methodLabel = 'UTANG';
+              }
 
               return (
-                <View style={[styles.historyCard, { backgroundColor: theme.surface, borderColor: theme.border }]}>
-                  <View style={styles.historyCardLeft}>
-                    <Text style={[styles.txNo, { color: theme.textPrimary }]}>
-                      {item.transaction_no} {item.payment_method === 'CREDIT' ? `(${item.customer_name || 'Utang'})` : ''}
-                    </Text>
-                    <Text style={[styles.txMeta, { color: theme.textSecondary }]}>
-                      {new Date(item.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })} • {item.payment_method}
-                    </Text>
-                    {totalDiscount > 0 && (
-                      <Text style={{ fontSize: 11, color: theme.warning, marginTop: 2, fontWeight: 'bold' }}>
-                        Discount Given: ₱{formatMoney(totalDiscount)}
-                      </Text>
-                    )}
-                  </View>
-
-                  <View style={styles.historyCardRight}>
-                    <Text style={[styles.txTotal, { color: theme.success }]}>
-                      ₱{formatMoney(item.total)}
-                    </Text>
+                <View style={[s.txCardContainer, { backgroundColor: theme.surface, borderColor: theme.border }]}>
+                  <TouchableOpacity 
+                    style={s.txCardRow}
+                    onPress={() => toggleExpand(item.id)}
+                    activeOpacity={0.7}
+                  >
+                    <View style={[s.txIconBox, { backgroundColor: color + '20' }]}>
+                      <Ionicons name={icon as any} size={20} color={color} />
+                    </View>
                     
-                    {/* Utang Split Display */}
-                    {item.payment_method === 'CREDIT' && (
-                      <Text style={{ fontSize: 11, color: theme.danger, marginTop: 2, fontWeight: 'bold' }}>
-                        DP: ₱{formatMoney(item.amount_paid)} | Utang: ₱{formatMoney(item.total - item.amount_paid)}
+                    <View style={s.txCenter}>
+                      <Text style={[s.txNo, { color: theme.textPrimary }]} numberOfLines={1}>
+                        {item.transaction_no} {item.customer_name ? `• ${item.customer_name}` : ''}
                       </Text>
-                    )}
+                      <Text style={[s.txTime, { color: theme.textSecondary }]}>
+                        {fmtTime(item.timestamp)} {item.items && item.items.length > 0 ? `• ${item.items.reduce((a,b)=>a+b.quantity,0)} items` : ''}
+                      </Text>
+                    </View>
 
-                    <Text style={[styles.txProfit, { color: theme.textSecondary, marginTop: item.payment_method === 'CREDIT' ? 2 : 4 }]}>
-                      Profit: ₱{formatMoney(item.gross_profit)}
-                    </Text>
-                  </View>
+                    <View style={s.txRight}>
+                      <Text style={[s.txAmt, { color: theme.textPrimary }]}>
+                        {isPayment ? '+' : ''}₱{fmt(isPayment ? item.amount_paid : item.total)}
+                      </Text>
+                      <View style={{ flexDirection: 'row', alignItems: 'center', gap: 4 }}>
+                        <Text style={[s.txMethod, { color }]}>{methodLabel}</Text>
+                        <Ionicons name={isExpanded ? "chevron-up" : "chevron-down"} size={14} color={theme.textMuted} />
+                      </View>
+                    </View>
+                  </TouchableOpacity>
+
+                  {/* TRANSACTION DETAIL ACCORDION */}
+                  {isExpanded && (
+                    <View style={[s.accordionContent, { borderTopColor: theme.border }]}>
+                      {item.payment_method !== 'UTANG_PAYMENT' && item.items && item.items.length > 0 && (
+                        <View style={s.itemsSection}>
+                          {item.items.map(si => (
+                            <View key={si.id} style={s.accordionItemRow}>
+                              <View style={s.accordionItemLeft}>
+                                <Text style={[s.accItemName, { color: theme.textPrimary }]}>{si.product_name}</Text>
+                                <Text style={[s.accItemMeta, { color: theme.textSecondary }]}>
+                                  {si.quantity} × {si.unit_type === 'PACK' ? 'Pack' : 'Piece'}
+                                </Text>
+                                <View style={{ flexDirection: 'row', gap: 12, marginTop: 2 }}>
+                                  <Text style={{ fontSize: 11, color: theme.textSecondary }}>Selling ₱{fmt(si.selling_price_unit)}</Text>
+                                  <Text style={{ fontSize: 11, color: theme.textMuted }}>Cost ₱{fmt(si.buying_price_unit)}</Text>
+                                  {si.discount > 0 && (
+                                    <Text style={{ fontSize: 11, color: theme.warning }}>Disc ₱{fmt(si.discount)}</Text>
+                                  )}
+                                </View>
+                              </View>
+                              <View style={s.accordionItemRight}>
+                                <Text style={[s.accItemTotal, { color: theme.textPrimary }]}>₱{fmt(si.subtotal)}</Text>
+                              </View>
+                            </View>
+                          ))}
+                        </View>
+                      )}
+
+                      {/* Detail Totals */}
+                      {item.payment_method !== 'UTANG_PAYMENT' ? (
+                        <View style={s.accTotalsContainer}>
+                          <View style={s.accTotalsCol}>
+                            <Text style={[s.accTotalsHeader, { color: theme.textSecondary }]}>SALES</Text>
+                            <View style={s.accTotalLine}><Text style={[s.accLabel, { color: theme.textSecondary }]}>Gross Sales</Text><Text style={[s.accVal, { color: theme.textPrimary }]}>₱{fmt(item.subtotal)}</Text></View>
+                            <View style={s.accTotalLine}><Text style={[s.accLabel, { color: theme.textSecondary }]}>Discounts</Text><Text style={[s.accVal, { color: theme.warning }]}>-₱{fmt((item.item_discounts || 0) + (item.transaction_discount || 0))}</Text></View>
+                            <View style={s.accTotalLine}><Text style={[s.accLabelBold, { color: theme.textPrimary }]}>Net Sales</Text><Text style={[s.accValBold, { color: theme.textPrimary }]}>₱{fmt(item.total)}</Text></View>
+                            <View style={s.accTotalLine}><Text style={[s.accLabel, { color: theme.textSecondary }]}>COGS</Text><Text style={[s.accVal, { color: theme.textSecondary }]}>₱{fmt(item.total_cogs)}</Text></View>
+                            <View style={s.accTotalLine}><Text style={[s.accLabelBold, { color: theme.success }]}>Gross Profit</Text><Text style={[s.accValBold, { color: theme.success }]}>₱{fmt(item.gross_profit)}</Text></View>
+                          </View>
+                          
+                          <View style={s.accTotalsCol}>
+                            <Text style={[s.accTotalsHeader, { color: theme.textSecondary }]}>PAYMENT</Text>
+                            <View style={s.accTotalLine}><Text style={[s.accLabel, { color: theme.textSecondary }]}>{isCredit ? 'Downpayment' : 'Cash Received'}</Text><Text style={[s.accVal, { color: theme.textPrimary }]}>₱{fmt(item.amount_paid)}</Text></View>
+                            {isCredit ? (
+                              <View style={s.accTotalLine}><Text style={[s.accLabelBold, { color: theme.danger }]}>Balance</Text><Text style={[s.accValBold, { color: theme.danger }]}>₱{fmt(item.total - item.amount_paid)}</Text></View>
+                            ) : (
+                              <View style={s.accTotalLine}><Text style={[s.accLabel, { color: theme.textSecondary }]}>Change</Text><Text style={[s.accVal, { color: theme.textSecondary }]}>₱{fmt(item.change_amount)}</Text></View>
+                            )}
+                          </View>
+                        </View>
+                      ) : (
+                        <View style={{ padding: 12 }}>
+                          <Text style={{ fontSize: 14, color: theme.textPrimary, fontWeight: '600' }}>Payment Received: ₱{fmt(item.amount_paid)}</Text>
+                        </View>
+                      )}
+                    </View>
+                  )}
                 </View>
-              )
+              );
             }}
           />
+        </View>
+
+        {isLandscape && (
+          <View style={s.sideColumn}>
+            <SummaryView />
+          </View>
         )}
       </View>
 
-      {/* COMPACT CALENDAR MODAL */}
-      <Modal visible={showDatePickerModal} transparent animationType="fade" onRequestClose={() => setShowDatePickerModal(false)}>
-        <View style={styles.modalOverlay}>
-          <View style={[styles.modalCard, { backgroundColor: theme.surface, borderColor: theme.border }]}>
-            <View style={[styles.modalHeader, { borderBottomColor: theme.border }]}>
-              <Text style={[styles.modalTitle, { color: theme.textPrimary }]}>Select Sales Date</Text>
-              <TouchableOpacity style={styles.closeBtn} onPress={() => setShowDatePickerModal(false)} activeOpacity={0.7}>
-                <Ionicons name="close" size={20} color={theme.textSecondary} />
+      {/* --------------------------------------------------------------------------- */}
+      {/* MODALS */}
+      {/* --------------------------------------------------------------------------- */}
+
+      {/* FILTER MODAL */}
+      <Modal visible={filterModalVisible} transparent animationType="fade" onRequestClose={() => setFilterModalVisible(false)}>
+        <TouchableOpacity style={s.overlay} activeOpacity={1} onPress={() => setFilterModalVisible(false)}>
+          <View style={[s.pickerBox, { backgroundColor: theme.surface, borderColor: theme.border }]}>
+            <View style={[s.pickerHeader, { borderBottomColor: theme.border }]}>
+              <Text style={[s.pickerTitle, { color: theme.textPrimary }]}>Filter by Payment Method</Text>
+              <TouchableOpacity onPress={() => setFilterModalVisible(false)}>
+                <Ionicons name="close" size={24} color={theme.textSecondary} />
+              </TouchableOpacity>
+            </View>
+            <View style={{ paddingVertical: 8 }}>
+              {(['ALL', 'CASH', 'CREDIT', 'UTANG_PAYMENT'] as const).map(m => (
+                <TouchableOpacity 
+                  key={m} 
+                  style={[s.pickerRow, filterMethod === m && { backgroundColor: theme.primaryGlow }]}
+                  onPress={() => { setFilterMethod(m); setFilterModalVisible(false); }}
+                >
+                  <Ionicons name={filterMethod === m ? "radio-button-on" : "radio-button-off"} size={20} color={filterMethod === m ? theme.primary : theme.textMuted} />
+                  <Text style={[s.pickerRowText, { color: theme.textPrimary }]}>
+                    {m === 'ALL' ? 'All Transactions' : m === 'CASH' ? 'Cash Sales' : m === 'CREDIT' ? 'Utang Sales' : 'Utang Payments'}
+                  </Text>
+                </TouchableOpacity>
+              ))}
+            </View>
+          </View>
+        </TouchableOpacity>
+      </Modal>
+
+      {/* DATE PICKER MODAL (SIMPLE) */}
+      <Modal visible={dateModalVisible} transparent animationType="fade" onRequestClose={() => setDateModalVisible(false)}>
+        <TouchableOpacity style={s.overlay} activeOpacity={1} onPress={() => setDateModalVisible(false)}>
+          <View style={[s.pickerBox, { backgroundColor: theme.surface, borderColor: theme.border, padding: 20 }]}>
+            <Text style={[s.pickerTitle, { color: theme.textPrimary, marginBottom: 16, textAlign: 'center' }]}>Select Date</Text>
+            
+            <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 20 }}>
+              <TouchableOpacity style={s.dateNavBtn} onPress={() => { const d = new Date(tempDate); d.setMonth(d.getMonth() - 1); setTempDate(d); }}>
+                <Ionicons name="chevron-back" size={24} color={theme.textPrimary} />
+              </TouchableOpacity>
+              
+              <Text style={{ fontSize: 18, fontWeight: '700', color: theme.textPrimary }}>
+                {tempDate.toLocaleString('default', { month: 'long', year: 'numeric' })}
+              </Text>
+              
+              <TouchableOpacity style={s.dateNavBtn} onPress={() => { const d = new Date(tempDate); d.setMonth(d.getMonth() + 1); setTempDate(d); }}>
+                <Ionicons name="chevron-forward" size={24} color={theme.textPrimary} />
+              </TouchableOpacity>
+            </View>
+            
+            <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 24 }}>
+              <TouchableOpacity style={s.dateNavBtn} onPress={() => { const d = new Date(tempDate); d.setDate(d.getDate() - 1); setTempDate(d); }}>
+                <Ionicons name="remove-circle-outline" size={28} color={theme.textPrimary} />
+              </TouchableOpacity>
+              
+              <Text style={{ fontSize: 24, fontWeight: '900', color: theme.accent }}>
+                {tempDate.getDate()}
+              </Text>
+              
+              <TouchableOpacity style={s.dateNavBtn} onPress={() => { const d = new Date(tempDate); d.setDate(d.getDate() + 1); setTempDate(d); }}>
+                <Ionicons name="add-circle-outline" size={28} color={theme.textPrimary} />
               </TouchableOpacity>
             </View>
 
-            <ScrollView style={{ flexShrink: 1 }} showsVerticalScrollIndicator={false} contentContainerStyle={{ paddingBottom: 4 }}>
-              <View style={styles.monthHeaderRow}>
-                <TouchableOpacity style={[styles.monthNavBtn, { backgroundColor: theme.bg, borderColor: theme.border }]} onPress={() => { if (pickerMonth === 0) { setPickerMonth(11); setPickerYear(pickerYear - 1); } else { setPickerMonth(pickerMonth - 1); } }}>
-                  <Ionicons name="chevron-back" size={14} color={theme.textPrimary} />
-                </TouchableOpacity>
-
-                <Text style={[styles.monthTitleText, { color: theme.textPrimary }]}>{months[pickerMonth]} {pickerYear}</Text>
-
-                <TouchableOpacity style={[styles.monthNavBtn, { backgroundColor: theme.bg, borderColor: theme.border }]} onPress={() => { if (pickerMonth === 11) { setPickerMonth(0); setPickerYear(pickerYear + 1); } else { setPickerMonth(pickerMonth + 1); } }}>
-                  <Ionicons name="chevron-forward" size={14} color={theme.textPrimary} />
-                </TouchableOpacity>
-              </View>
-
-              <View style={styles.weekdaysRow}>
-                {weekdays.map(w => <Text key={w} style={[styles.weekdayText, { color: theme.textSecondary }]}>{w}</Text>)}
-              </View>
-
-              <View style={styles.calendarGrid}>
-                {Array.from({ length: firstDayOfWeek }).map((_, idx) => <View key={`empty-${idx}`} style={styles.calendarCell} />)}
-
-                {Array.from({ length: daysInMonth }, (_, i) => i + 1).map(dayNum => {
-                  const isSelected = selectedDate.getDate() === dayNum && selectedDate.getMonth() === pickerMonth && selectedDate.getFullYear() === pickerYear;
-                  return (
-                    <TouchableOpacity key={dayNum} style={[styles.calendarCell, isSelected && { backgroundColor: theme.primary, borderRadius: 6 }]} onPress={() => handleSelectDay(dayNum)} activeOpacity={0.7}>
-                      <Text style={[styles.calendarDayText, { color: isSelected ? '#ffffff' : theme.textPrimary }]}>{dayNum}</Text>
-                    </TouchableOpacity>
-                  );
-                })}
-              </View>
-            </ScrollView>
-
-            <TouchableOpacity style={[styles.todayResetBtn, { backgroundColor: theme.primaryGlow }]} onPress={() => { setSelectedDate(new Date()); setShowDatePickerModal(false); }} activeOpacity={0.8}>
-              <Ionicons name="time-outline" size={14} color={theme.accent} />
-              <Text style={[styles.todayResetBtnText, { color: theme.accent }]}>Jump to Today</Text>
-            </TouchableOpacity>
+            <View style={{ flexDirection: 'row', gap: 12 }}>
+              <TouchableOpacity style={[s.actionBtn, { flex: 1, backgroundColor: theme.surfaceElevated, borderColor: theme.border }]} onPress={() => setDateModalVisible(false)}>
+                <Text style={{ color: theme.textPrimary, fontWeight: '700' }}>Cancel</Text>
+              </TouchableOpacity>
+              <TouchableOpacity style={[s.actionBtn, { flex: 1, backgroundColor: theme.primary, borderColor: theme.primary }]} onPress={() => handleApplyDate(tempDate)}>
+                <Text style={{ color: '#fff', fontWeight: '700' }}>Apply</Text>
+              </TouchableOpacity>
+            </View>
           </View>
-        </View>
+        </TouchableOpacity>
       </Modal>
-    </View>
+
+    </SafeAreaView>
   );
 };
 
-const styles = StyleSheet.create({
-  container: { flex: 1, padding: 14 },
-  dateBarWrapper: { alignItems: 'center', marginBottom: 14 },
-  datePickerBtn: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8, paddingHorizontal: 20, height: 48, borderRadius: 12, borderWidth: 1, width: '100%', maxWidth: 360 },
-  datePickerText: { fontSize: 14, fontWeight: 'bold' },
-  metricsRow: { flexDirection: 'row', gap: 10, marginBottom: 14 },
-  metricCard: { flex: 1, paddingHorizontal: 12, paddingVertical: 12, borderRadius: 12, borderWidth: 1, justifyContent: 'center' },
-  metricHeader: { flexDirection: 'row', alignItems: 'center', gap: 6 },
-  metricLabel: { fontSize: 12, fontWeight: 'bold' },
-  metricVal: { fontSize: 16, fontWeight: 'bold', marginTop: 4 },
-  historyContainer: { flex: 1 },
-  historyHeaderRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'flex-end', marginBottom: 10 },
-  sectionTitle: { fontSize: 16, fontWeight: 'bold' },
-  sectionSub: { fontSize: 12, marginTop: 2 },
-  loadingBox: { flex: 1, justifyContent: 'center', alignItems: 'center', gap: 6 },
-  loadingText: { fontSize: 13, fontWeight: 'bold' },
-  emptyCard: { flex: 1, padding: 24, borderRadius: 12, borderWidth: 1, alignItems: 'center', justifyContent: 'center', gap: 8 },
-  emptyTitle: { fontSize: 14, fontWeight: 'bold' },
-  emptySub: { fontSize: 12, textAlign: 'center' },
-  historyCard: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', paddingHorizontal: 14, paddingVertical: 12, borderRadius: 10, borderWidth: 1, marginBottom: 8, minHeight: 52 },
-  historyCardLeft: { justifyContent: 'center', flex: 1 },
-  txNo: { fontSize: 14, fontWeight: 'bold' },
-  txMeta: { fontSize: 12, marginTop: 2 },
-  historyCardRight: { alignItems: 'flex-end', justifyContent: 'center' },
-  txTotal: { fontSize: 15, fontWeight: 'bold' },
-  txProfit: { fontSize: 12 },
-  modalOverlay: { flex: 1, backgroundColor: 'rgba(0,0,0,0.75)', justifyContent: 'center', alignItems: 'center', padding: 12 },
-  modalCard: { width: '90%', maxWidth: 320, maxHeight: '90%', borderRadius: 12, borderWidth: 1, padding: 14, gap: 8 },
-  modalHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', paddingBottom: 8, borderBottomWidth: 1, marginBottom: 4 },
-  modalTitle: { fontSize: 14, fontWeight: 'bold' },
-  closeBtn: { padding: 4 },
-  monthHeaderRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginTop: 2 },
-  monthNavBtn: { width: 32, height: 32, borderRadius: 8, borderWidth: 1, justifyContent: 'center', alignItems: 'center' },
-  monthTitleText: { fontSize: 13, fontWeight: 'bold' },
-  weekdaysRow: { flexDirection: 'row', justifyContent: 'space-around', paddingVertical: 2 },
-  weekdayText: { width: 36, textAlign: 'center', fontSize: 11, fontWeight: 'bold' },
-  calendarGrid: { flexDirection: 'row', flexWrap: 'wrap', justifyContent: 'flex-start' },
-  calendarCell: { width: '14.28%', height: 34, justifyContent: 'center', alignItems: 'center', marginVertical: 1 }, 
-  calendarDayText: { fontSize: 12, fontWeight: 'bold' },
-  todayResetBtn: { flexDirection: 'row', justifyContent: 'center', alignItems: 'center', gap: 6, height: 38, borderRadius: 8, marginTop: 4 },
-  todayResetBtnText: { fontSize: 13, fontWeight: 'bold' },
+const s = StyleSheet.create({
+  root: { flex: 1 },
+  mainLayout: { flex: 1 },
+  mainColumn: { flex: 2, paddingRight: 8 },
+  sideColumn: { flex: 1, paddingLeft: 8, paddingTop: 14, paddingRight: 14 },
+  
+  listContent: { padding: 14 },
+  
+  headerContainer: { marginBottom: 12 },
+  headerControls: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 },
+  
+  dateNav: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', height: 44, borderRadius: 12, borderWidth: 1, paddingHorizontal: 4, flex: 1, maxWidth: 300 },
+  dateNavBtn: { padding: 8 },
+  dateNavCenter: { flexDirection: 'row', alignItems: 'center', gap: 8, flex: 1, justifyContent: 'center' },
+  dateNavText: { fontSize: 15, fontWeight: '800' },
+  
+  sideSummaryPortrait: { marginBottom: 16 },
+  sideSummaryLandscape: { },
+  
+  summaryBox: { padding: 16, borderRadius: 12, borderWidth: 1, marginBottom: 12 },
+  summarySectionTitle: { fontSize: 12, fontWeight: '800', letterSpacing: 1, marginBottom: 10 },
+  summaryRow: { flexDirection: 'row', justifyContent: 'space-between', marginBottom: 6 },
+  summaryDivider: { paddingTop: 6, marginTop: 4, borderTopWidth: 1 },
+  summaryLabel: { fontSize: 13, fontWeight: '600' },
+  summaryValue: { fontSize: 14, fontWeight: '700' },
+  summaryLabelBold: { fontSize: 14, fontWeight: '800' },
+  summaryValueBold: { fontSize: 15, fontWeight: '800' },
+  
+  searchFilterRow: { flexDirection: 'row', gap: 8, marginBottom: 16, marginTop: 4 },
+  searchBar: { flex: 1, flexDirection: 'row', alignItems: 'center', height: 44, borderRadius: 10, borderWidth: 1, paddingHorizontal: 12 },
+  searchInput: { flex: 1, marginLeft: 8, fontSize: 14 },
+  filterBtn: { flexDirection: 'row', alignItems: 'center', height: 44, paddingHorizontal: 12, borderRadius: 10, borderWidth: 1, justifyContent: 'center' },
+  
+  txCount: { fontSize: 12, fontWeight: '800', letterSpacing: 1, marginLeft: 4, marginBottom: 8 },
+  
+  empty: { alignItems: 'center', justifyContent: 'center', marginTop: 40, gap: 12 },
+  emptyTitle: { fontSize: 18, fontWeight: '700' },
+  
+  txCardContainer: { borderRadius: 12, borderWidth: 1, marginBottom: 10, overflow: 'hidden' },
+  txCardRow: { flexDirection: 'row', alignItems: 'center', padding: 14 },
+  txIconBox: { width: 40, height: 40, borderRadius: 20, justifyContent: 'center', alignItems: 'center', marginRight: 12 },
+  txCenter: { flex: 1, justifyContent: 'center' },
+  txNo: { fontSize: 14, fontWeight: '800', marginBottom: 2 },
+  txTime: { fontSize: 12 },
+  txRight: { alignItems: 'flex-end', justifyContent: 'center' },
+  txAmt: { fontSize: 15, fontWeight: '900', marginBottom: 2 },
+  txMethod: { fontSize: 11, fontWeight: '800', letterSpacing: 0.5 },
+  
+  accordionContent: { borderTopWidth: 1, backgroundColor: 'rgba(0,0,0,0.01)' },
+  itemsSection: { padding: 14, paddingBottom: 6 },
+  accordionItemRow: { flexDirection: 'row', justifyContent: 'space-between', marginBottom: 12 },
+  accordionItemLeft: { flex: 1, paddingRight: 12 },
+  accItemName: { fontSize: 13, fontWeight: '700', marginBottom: 2 },
+  accItemMeta: { fontSize: 12 },
+  accordionItemRight: { justifyContent: 'flex-start' },
+  accItemTotal: { fontSize: 13, fontWeight: '800' },
+  
+  accTotalsContainer: { flexDirection: 'row', padding: 14, paddingTop: 4, gap: 20 },
+  accTotalsCol: { flex: 1 },
+  accTotalsHeader: { fontSize: 11, fontWeight: '800', letterSpacing: 0.5, marginBottom: 6 },
+  accTotalLine: { flexDirection: 'row', justifyContent: 'space-between', marginBottom: 4 },
+  accLabel: { fontSize: 12, fontWeight: '500' },
+  accVal: { fontSize: 12, fontWeight: '600' },
+  accLabelBold: { fontSize: 12, fontWeight: '800' },
+  accValBold: { fontSize: 12, fontWeight: '800' },
+  
+  overlay: { flex: 1, backgroundColor: 'rgba(0,0,0,0.5)', justifyContent: 'center', alignItems: 'center', padding: 16 },
+  pickerBox: { width: '100%', maxWidth: 360, borderRadius: 16, borderWidth: 1, overflow: 'hidden' },
+  pickerHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', padding: 16, borderBottomWidth: 1 },
+  pickerTitle: { fontSize: 16, fontWeight: '900' },
+  pickerRow: { flexDirection: 'row', alignItems: 'center', padding: 16, borderBottomWidth: 0.5, borderBottomColor: 'rgba(0,0,0,0.05)' },
+  pickerRowText: { fontSize: 15, fontWeight: '600', marginLeft: 12 },
+  
+  actionBtn: { height: 44, borderRadius: 10, borderWidth: 1, justifyContent: 'center', alignItems: 'center' }
 });

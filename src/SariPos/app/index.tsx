@@ -1,36 +1,41 @@
 import React, { useState } from 'react';
-import { View, StyleSheet, StatusBar } from 'react-native';
-import { POSProvider, usePOS } from '../context/POSContext';
+import { StatusBar, StyleSheet, useWindowDimensions, View } from 'react-native';
 import { NavigationBar } from '../components/NavigationBar';
-import { POSScreen } from '../screens/POSScreen';
+import { POSProvider, usePOS } from '../context/POSContext';
+import { CashDrawerScreen } from '../screens/CashDrawerScreen';
 import { InventoryScreen } from '../screens/InventoryScreen';
+import { POSScreen } from '../screens/POSScreen';
 import { SalesScreen } from '../screens/SalesScreen';
-import { UtangScreen } from '../screens/UtangScreen';
 import { SettingsScreen } from '../screens/SettingsScreen';
+import { UtangScreen } from '../screens/UtangScreen';
 import { getTheme } from '../theme/theme';
 
 const MainLayout: React.FC = () => {
   const { cart, settings } = usePOS();
   const theme = getTheme(settings.theme === 'dark');
+  const { width, height } = useWindowDimensions();
+  const isPortrait = height > width;
 
-  const [currentTab, setCurrentTab] = useState<'POS' | 'INVENTORY' | 'SALES' | 'UTANG' | 'SETTINGS'>('POS');
+  const [currentTab, setCurrentTab] = useState<'POS' | 'INVENTORY' | 'SALES' | 'UTANG' | 'SETTINGS' | 'CASH'>('POS');
 
   const totalCartCount = cart.reduce((sum, item) => sum + item.quantity, 0);
 
   return (
     <View style={[styles.container, { backgroundColor: theme.bg }]}>
-      {/* Absolute Full Screen Kiosk Mode */}
       <StatusBar hidden={true} />
       
-      <View style={styles.contentRow}>
-        {/* Navigation Sidebar */}
-        <NavigationBar
-          currentTab={currentTab}
-          onSelectTab={setCurrentTab}
-          cartItemCount={totalCartCount}
-        />
+      <View style={[styles.contentWrapper, isPortrait ? styles.contentPortrait : styles.contentLandscape]}>
+        {/* Navigation - Sidebar in Landscape, Bottom Bar in Portrait */}
+        {!isPortrait && (
+          <NavigationBar
+            currentTab={currentTab}
+            onSelectTab={setCurrentTab}
+            cartItemCount={totalCartCount}
+            isPortrait={false}
+          />
+        )}
 
-        {/* Dynamic Screen View - Uses display toggling to prevent state loss on tab switch */}
+        {/* Dynamic Screen View */}
         <View style={styles.screenContainer}>
           <View style={[styles.screenWrapper, currentTab === 'POS' ? styles.active : styles.hidden]}>
             <POSScreen />
@@ -48,10 +53,23 @@ const MainLayout: React.FC = () => {
             <UtangScreen />
           </View>
           
+          <View style={[styles.screenWrapper, currentTab === 'CASH' ? styles.active : styles.hidden]}>
+            <CashDrawerScreen />
+          </View>
+          
           <View style={[styles.screenWrapper, currentTab === 'SETTINGS' ? styles.active : styles.hidden]}>
             <SettingsScreen />
           </View>
         </View>
+
+        {isPortrait && (
+          <NavigationBar
+            currentTab={currentTab}
+            onSelectTab={setCurrentTab}
+            cartItemCount={totalCartCount}
+            isPortrait={true}
+          />
+        )}
       </View>
     </View>
   );
@@ -69,9 +87,14 @@ const styles = StyleSheet.create({
   container: {
     flex: 1,
   },
-  contentRow: {
+  contentWrapper: {
     flex: 1,
+  },
+  contentLandscape: {
     flexDirection: 'row',
+  },
+  contentPortrait: {
+    flexDirection: 'column',
   },
   screenContainer: {
     flex: 1,
@@ -84,5 +107,35 @@ const styles = StyleSheet.create({
   },
   hidden: {
     display: 'none',
+  },
+  topHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    height: 56,
+    paddingHorizontal: 16,
+    borderBottomWidth: 1,
+    elevation: 2,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 1 },
+    shadowOpacity: 0.05,
+    shadowRadius: 2,
+    zIndex: 10,
+  },
+  topHeaderTitle: {
+    fontSize: 18,
+    fontWeight: '800',
+  },
+  settingsBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+    borderRadius: 8,
+    gap: 6,
+  },
+  settingsBtnText: {
+    fontSize: 14,
+    fontWeight: '700',
   }
 });

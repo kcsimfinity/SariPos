@@ -1,19 +1,31 @@
+import { Ionicons } from '@expo/vector-icons';
+import * as FileSystem from 'expo-file-system/legacy';
+import * as Sharing from 'expo-sharing';
 import React, { useState } from 'react';
-import { View, Text, TextInput, TouchableOpacity, StyleSheet, ScrollView, Alert, Switch, Platform } from 'react-native';
+import {
+  Alert,
+  Platform,
+  SafeAreaView,
+  ScrollView,
+  StyleSheet,
+  Text,
+  TextInput,
+  TouchableOpacity,
+  View,
+  useWindowDimensions
+} from 'react-native';
 import { usePOS } from '../context/POSContext';
 import { dbService } from '../database/databaseService';
-import { StoreSettings } from '../types';
-import * as Sharing from 'expo-sharing';
-import * as FileSystem from 'expo-file-system/legacy';
-import { Ionicons } from '@expo/vector-icons';
 import { getTheme } from '../theme/theme';
+import { StoreSettings } from '../types';
 
 export const SettingsScreen: React.FC = () => {
   const { settings, updateStoreSettings, toggleTheme } = usePOS();
   const theme = getTheme(settings.theme === 'dark');
+  const { width } = useWindowDimensions();
 
   const [form, setForm] = useState<StoreSettings>(settings);
-  const [activeSection, setActiveSection] = useState<'STORE' | 'APPEARANCE' | 'RECEIPT' | 'DATA' | 'RESET'>('STORE');
+  const [activeSection, setActiveSection] = useState<'STORE' | 'APPEARANCE' | 'CASH_DRAWER' | 'DATA' | 'RESET'>('STORE');
 
   const handleSaveStoreInfo = async () => {
     if (!form.store_name.trim()) {
@@ -21,7 +33,7 @@ export const SettingsScreen: React.FC = () => {
       return;
     }
     await updateStoreSettings(form);
-    Alert.alert('System Message', 'Store settings updated successfully.');
+    Alert.alert('Success', 'Settings updated successfully.');
   };
 
   const saveToAndroidFolder = async (fileName: string, mimeType: string, content: string): Promise<boolean> => {
@@ -35,7 +47,7 @@ export const SettingsScreen: React.FC = () => {
             mimeType
           );
           await FileSystem.writeAsStringAsync(fileUri, content);
-          Alert.alert('Export Successful', 'File written directly to destination folder.');
+          Alert.alert('Export Successful', 'File saved to destination folder.');
           return true;
         }
       } catch (e: any) {
@@ -48,7 +60,7 @@ export const SettingsScreen: React.FC = () => {
   const handleExportJSON = async () => {
     try {
       const jsonStr = await dbService.exportDatabaseJSON();
-      const fileName = `SariPos_Database_Dump_${Date.now()}`;
+      const fileName = `SariPos_Backup_${Date.now()}`;
 
       const savedDirectly = await saveToAndroidFolder(fileName, 'application/json', jsonStr);
       if (savedDirectly) return;
@@ -60,7 +72,7 @@ export const SettingsScreen: React.FC = () => {
         await Sharing.shareAsync(tempUri, { mimeType: 'application/json', dialogTitle: 'Export System JSON Backup' });
       }
     } catch (e: any) {
-      Alert.alert('Export Exception', e.message);
+      Alert.alert('Export Error', e.message);
     }
   };
 
@@ -98,12 +110,12 @@ export const SettingsScreen: React.FC = () => {
 
   const handleFactoryReset = () => {
     Alert.alert(
-      '☢️ SYSTEM PURGE WARNING',
-      'This operation will permanently purge all stored products, stock histories, and transaction ledgers. Continue?',
+      'FACTORY RESET WARNING',
+      'This will permanently delete ALL products, stock history, and sales records. This cannot be undone. Continue?',
       [
-        { text: 'Abort', style: 'cancel' },
+        { text: 'Cancel', style: 'cancel' },
         {
-          text: 'PURGE DATABASE',
+          text: 'ERASE EVERYTHING',
           style: 'destructive',
           onPress: async () => {
             try {
@@ -113,295 +125,261 @@ export const SettingsScreen: React.FC = () => {
                 data: { categories: [], products: [], sales: [], saleItems: [], stockAdjustments: [], settings: [] }
               });
               await dbService.importDatabaseJSON(emptyBackup);
-              Alert.alert('Purge Executed', 'System reset to factory initial state.');
+              Alert.alert('Reset Complete', 'System reset to factory defaults.');
             } catch (e: any) {
-              Alert.alert('Reset Exception', e.message);
+              Alert.alert('Reset Error', e.message);
             }
           }
         }
       ]
     );
   };
+  const NavTab = ({ id, icon, label, isDanger }: any) => {
+    const isActive = activeSection === id;
+    const color = isDanger ? theme.danger : theme.primary;
+    const activeColor = '#ffffff';
+    const inactiveColor = isDanger ? theme.danger : theme.textSecondary;
+
+    return (
+      <TouchableOpacity
+        style={[
+          styles.navTab,
+          { backgroundColor: isActive ? color : 'transparent' }
+        ]}
+        onPress={() => setActiveSection(id)}
+        activeOpacity={0.8}
+      >
+        <Ionicons name={icon} size={16} color={isActive ? activeColor : inactiveColor} />
+        <Text style={[styles.navTabText, { color: isActive ? activeColor : inactiveColor }]}>{label}</Text>
+      </TouchableOpacity>
+    );
+  };
 
   return (
-    <View style={[styles.container, { backgroundColor: theme.bg }]}>
+    <SafeAreaView style={[styles.container, { backgroundColor: theme.bg }]}>
       
-      {/* TOP SUB-NAVIGATION BAR */}
-      <View style={[styles.topSubBar, { backgroundColor: theme.surface, borderColor: theme.border }]}>
-        <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.topSubScroll}>
-          <TouchableOpacity
-            style={[
-              styles.navTab,
-              { backgroundColor: theme.surfaceElevated, borderColor: theme.border },
-              activeSection === 'STORE' && { backgroundColor: theme.primary, borderColor: theme.accent }
-            ]}
-            onPress={() => setActiveSection('STORE')}
-            activeOpacity={0.8}
-          >
-            <Ionicons name="storefront" size={16} color={activeSection === 'STORE' ? '#ffffff' : theme.textSecondary} />
-            <Text style={[styles.navTabText, { color: activeSection === 'STORE' ? '#ffffff' : theme.textSecondary }]}>
-              STORE PROFILE
-            </Text>
-          </TouchableOpacity>
-
-          <TouchableOpacity
-            style={[
-              styles.navTab,
-              { backgroundColor: theme.surfaceElevated, borderColor: theme.border },
-              activeSection === 'APPEARANCE' && { backgroundColor: theme.primary, borderColor: theme.accent }
-            ]}
-            onPress={() => setActiveSection('APPEARANCE')}
-            activeOpacity={0.8}
-          >
-            <Ionicons name="color-palette" size={16} color={activeSection === 'APPEARANCE' ? '#ffffff' : theme.textSecondary} />
-            <Text style={[styles.navTabText, { color: activeSection === 'APPEARANCE' ? '#ffffff' : theme.textSecondary }]}>
-              DISPLAY & THEME
-            </Text>
-          </TouchableOpacity>
-
-          <TouchableOpacity
-            style={[
-              styles.navTab,
-              { backgroundColor: theme.surfaceElevated, borderColor: theme.border },
-              activeSection === 'RECEIPT' && { backgroundColor: theme.primary, borderColor: theme.accent }
-            ]}
-            onPress={() => setActiveSection('RECEIPT')}
-            activeOpacity={0.8}
-          >
-            <Ionicons name="receipt" size={16} color={activeSection === 'RECEIPT' ? '#ffffff' : theme.textSecondary} />
-            <Text style={[styles.navTabText, { color: activeSection === 'RECEIPT' ? '#ffffff' : theme.textSecondary }]}>
-              RECEIPT CONFIG
-            </Text>
-          </TouchableOpacity>
-
-          <TouchableOpacity
-            style={[
-              styles.navTab,
-              { backgroundColor: theme.surfaceElevated, borderColor: theme.border },
-              activeSection === 'DATA' && { backgroundColor: theme.primary, borderColor: theme.accent }
-            ]}
-            onPress={() => setActiveSection('DATA')}
-            activeOpacity={0.8}
-          >
-            <Ionicons name="cloud-download" size={16} color={activeSection === 'DATA' ? '#ffffff' : theme.textSecondary} />
-            <Text style={[styles.navTabText, { color: activeSection === 'DATA' ? '#ffffff' : theme.textSecondary }]}>
-              REPORTS & BACKUP
-            </Text>
-          </TouchableOpacity>
-
-          <TouchableOpacity
-            style={[
-              styles.navTab,
-              styles.dangerNavTab,
-              activeSection === 'RESET' && { backgroundColor: '#ef4444', borderColor: '#ef4444' }
-            ]}
-            onPress={() => setActiveSection('RESET')}
-            activeOpacity={0.8}
-          >
-            <Ionicons name="warning" size={16} color={activeSection === 'RESET' ? '#ffffff' : '#ef4444'} />
-            <Text style={[styles.navTabText, { color: activeSection === 'RESET' ? '#ffffff' : '#ef4444' }]}>
-              DANGER ZONE
-            </Text>
-          </TouchableOpacity>
+      {/* HEADER & COMPACT NAVIGATION */}
+      <View style={[styles.headerContainer, { backgroundColor: theme.surface, borderBottomColor: theme.border }]}>
+        <View style={styles.headerTitleRow}>
+          <Text style={[styles.pageTitle, { color: theme.textPrimary }]}>SETTINGS</Text>
+          <Text style={[styles.pageSub, { color: theme.textSecondary }]}>Manage your POS configuration</Text>
+        </View>
+        
+        <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.navScroll}>
+          <NavTab id="STORE" icon="storefront" label="Store Profile" />
+          <NavTab id="APPEARANCE" icon="color-palette" label="Appearance" />
+          <NavTab id="CASH_DRAWER" icon="cash" label="Cash Drawer" />
+          <NavTab id="DATA" icon="cloud-download" label="Backup & Reports" />
+          <NavTab id="RESET" icon="warning" label="Danger Zone" isDanger />
         </ScrollView>
       </View>
 
-      {/* ACTIVE MODULE CONTENT DISPLAY */}
-      <ScrollView contentContainerStyle={{ padding: 16 }}>
-        {activeSection === 'STORE' && (
-          <View style={[styles.cyberCard, { backgroundColor: theme.surface, borderColor: theme.border }]}>
-            <View style={styles.cardHeader}>
-              <View style={[styles.badgeIcon, { backgroundColor: theme.primaryGlow }]}>
-                <Ionicons name="business" size={20} color={theme.accent} />
-              </View>
-              <View style={{ flex: 1 }}>
-                <Text style={[styles.cardTitle, { color: theme.textPrimary }]}>Store Information & Branding</Text>
-                <Text style={[styles.cardSub, { color: theme.textSecondary }]}>Updates store title displayed on receipts and branding headers.</Text>
-              </View>
-            </View>
-
-            <Text style={[styles.fieldLabel, { color: theme.textSecondary }]}>STORE BRAND NAME</Text>
-            <TextInput
-              style={[styles.cyberInput, { backgroundColor: theme.bg, color: theme.textPrimary, borderColor: theme.border }]}
-              value={form.store_name}
-              onChangeText={v => setForm({ ...form, store_name: v })}
-              placeholder="e.g. Aling Nena Sari-Sari Store"
-              placeholderTextColor={theme.textMuted}
-            />
-
-            <Text style={[styles.fieldLabel, { color: theme.textSecondary }]}>LOCATION ADDRESS LINE</Text>
-            <TextInput
-              style={[styles.cyberInput, { backgroundColor: theme.bg, color: theme.textPrimary, borderColor: theme.border }]}
-              value={form.store_address}
-              onChangeText={v => setForm({ ...form, store_address: v })}
-              placeholder="e.g. Brgy. San Jose, Angeles City"
-              placeholderTextColor={theme.textMuted}
-            />
-
-            <Text style={[styles.fieldLabel, { color: theme.textSecondary }]}>CONTACT PHONE NUMBER</Text>
-            <TextInput
-              style={[styles.cyberInput, { backgroundColor: theme.bg, color: theme.textPrimary, borderColor: theme.border }]}
-              value={form.store_phone}
-              onChangeText={v => setForm({ ...form, store_phone: v })}
-              placeholder="e.g. 0917 123 4567"
-              placeholderTextColor={theme.textMuted}
-            />
-
-            <TouchableOpacity style={[styles.actionBtn, { backgroundColor: theme.primary }]} onPress={handleSaveStoreInfo} activeOpacity={0.8}>
-              <Ionicons name="save" size={16} color="#ffffff" />
-              <Text style={styles.actionBtnText}>SAVE STORE PROFILE</Text>
-            </TouchableOpacity>
-          </View>
-        )}
-
-        {activeSection === 'APPEARANCE' && (
-          <View style={[styles.cyberCard, { backgroundColor: theme.surface, borderColor: theme.border }]}>
-            <View style={styles.cardHeader}>
-              <View style={[styles.badgeIcon, { backgroundColor: theme.primaryGlow }]}>
-                <Ionicons name="moon" size={20} color={theme.accent} />
-              </View>
-              <View style={{ flex: 1 }}>
-                <Text style={[styles.cardTitle, { color: theme.textPrimary }]}>Display Mode & Visual Matrix</Text>
-                <Text style={[styles.cardSub, { color: theme.textSecondary }]}>Switch between Dark Slate Mode and Light Studio Mode.</Text>
-              </View>
-            </View>
-
-            <View style={[styles.switchRow, { backgroundColor: theme.bg, borderColor: theme.border }]}>
-              <View style={{ flex: 1 }}>
-                <Text style={[styles.switchTitle, { color: theme.textPrimary }]}>Dark Mode Spectrum</Text>
-                <Text style={[styles.switchSub, { color: theme.textSecondary }]}>High contrast slate theme designed for tablet screens.</Text>
-              </View>
-              <Switch
-                value={settings.theme === 'dark'}
-                onValueChange={toggleTheme}
-                thumbColor="#ffffff"
-                trackColor={{ false: '#64748b', true: theme.primary }}
-              />
-            </View>
-          </View>
-        )}
-
-        {activeSection === 'RECEIPT' && (
-          <View style={[styles.cyberCard, { backgroundColor: theme.surface, borderColor: theme.border }]}>
-            <View style={styles.cardHeader}>
-              <View style={[styles.badgeIcon, { backgroundColor: theme.primaryGlow }]}>
-                <Ionicons name="document-text" size={20} color={theme.accent} />
-              </View>
-              <View style={{ flex: 1 }}>
-                <Text style={[styles.cardTitle, { color: theme.textPrimary }]}>Receipt Message Config</Text>
-                <Text style={[styles.cardSub, { color: theme.textSecondary }]}>Customize top header greeting and footer thank-you message.</Text>
-              </View>
-            </View>
-
-            <Text style={[styles.fieldLabel, { color: theme.textSecondary }]}>HEADER GREETING</Text>
-            <TextInput
-              style={[styles.cyberInput, { backgroundColor: theme.bg, color: theme.textPrimary, borderColor: theme.border }]}
-              value={form.receipt_header}
-              onChangeText={v => setForm({ ...form, receipt_header: v })}
-              placeholder="e.g. Welcome to our Store!"
-              placeholderTextColor={theme.textMuted}
-            />
-
-            <Text style={[styles.fieldLabel, { color: theme.textSecondary }]}>FOOTER MESSAGE</Text>
-            <TextInput
-              style={[styles.cyberInput, { backgroundColor: theme.bg, color: theme.textPrimary, borderColor: theme.border }]}
-              value={form.receipt_footer}
-              onChangeText={v => setForm({ ...form, receipt_footer: v })}
-              placeholder="e.g. Thank you for shopping with us!"
-              placeholderTextColor={theme.textMuted}
-            />
-
-            <TouchableOpacity style={[styles.actionBtn, { backgroundColor: theme.primary }]} onPress={handleSaveStoreInfo} activeOpacity={0.8}>
-              <Ionicons name="save" size={16} color="#ffffff" />
-              <Text style={styles.actionBtnText}>SAVE RECEIPT CONFIG</Text>
-            </TouchableOpacity>
-          </View>
-        )}
-
-        {activeSection === 'DATA' && (
-          <View style={[styles.cyberCard, { backgroundColor: theme.surface, borderColor: theme.border }]}>
-            <View style={styles.cardHeader}>
-              <View style={[styles.badgeIcon, { backgroundColor: theme.primaryGlow }]}>
-                <Ionicons name="cloud-upload" size={20} color={theme.accent} />
-              </View>
-              <View style={{ flex: 1 }}>
-                <Text style={[styles.cardTitle, { color: theme.textPrimary }]}>Database Pipeline & Reports</Text>
-                <Text style={[styles.cardSub, { color: theme.textSecondary }]}>Export transaction history and stock inventory to files.</Text>
-              </View>
-            </View>
-
-            <View style={{ gap: 10, marginTop: 10 }}>
-              <TouchableOpacity style={[styles.exportCard, { backgroundColor: '#10b981' }]} onPress={handleExportCSVReport} activeOpacity={0.8}>
-                <Ionicons name="document-text" size={22} color="#ffffff" />
-                <View style={{ flex: 1 }}>
-                  <Text style={styles.exportTitle}>EXPORT EXCEL / CSV REPORT</Text>
-                  <Text style={styles.exportSub}>Itemized sales transaction logs & stock catalog sheet.</Text>
+      {/* CONTENT AREA (Scrolls only if necessary) */}
+      <View style={styles.contentContainer}>
+        <ScrollView contentContainerStyle={styles.contentScroll} showsVerticalScrollIndicator={false}>
+          
+          {/* STORE TAB */}
+          {activeSection === 'STORE' && (
+            <View style={[styles.card, { backgroundColor: theme.surface, borderColor: theme.border }]}>
+              <View style={styles.cardHeader}>
+                <View style={[styles.badgeIcon, { backgroundColor: theme.primaryGlow }]}>
+                  <Ionicons name="storefront" size={20} color={theme.primary} />
                 </View>
-                <Ionicons name="download" size={18} color="#ffffff" />
-              </TouchableOpacity>
-
-              <TouchableOpacity style={[styles.exportCard, { backgroundColor: '#0284c7' }]} onPress={handleExportJSON} activeOpacity={0.8}>
-                <Ionicons name="archive" size={22} color="#ffffff" />
                 <View style={{ flex: 1 }}>
-                  <Text style={styles.exportTitle}>EXPORT FULL JSON BACKUP</Text>
-                  <Text style={styles.exportSub}>Raw database backup for full system restoration.</Text>
+                  <Text style={[styles.cardTitle, { color: theme.textPrimary }]}>Store Information</Text>
+                  <Text style={[styles.cardSub, { color: theme.textSecondary }]}>Basic information used throughout the POS</Text>
                 </View>
-                <Ionicons name="download" size={18} color="#ffffff" />
-              </TouchableOpacity>
-            </View>
-          </View>
-        )}
-
-        {activeSection === 'RESET' && (
-          <View style={[styles.cyberCard, { backgroundColor: theme.surface, borderColor: '#ef4444' }]}>
-            <View style={styles.cardHeader}>
-              <View style={[styles.badgeIcon, { backgroundColor: 'rgba(239, 68, 68, 0.15)' }]}>
-                <Ionicons name="alert-circle" size={20} color="#ef4444" />
               </View>
-              <View style={{ flex: 1 }}>
-                <Text style={[styles.cardTitle, { color: '#ef4444' }]}>Danger Zone & Database Reset</Text>
-                <Text style={[styles.cardSub, { color: theme.textSecondary }]}>Irreversible wipe of all product stock and transaction records.</Text>
+
+              <View style={styles.horizontalForm}>
+                <View style={{ flex: 1, gap: 6 }}>
+                  <Text style={[styles.fieldLabel, { color: theme.textSecondary }]}>STORE NAME</Text>
+                  <TextInput
+                    style={[styles.input, { backgroundColor: theme.bg, color: theme.textPrimary, borderColor: theme.border }]}
+                    value={form.store_name}
+                    onChangeText={v => setForm({ ...form, store_name: v })}
+                    placeholder="e.g. Aling Nena Sari-Sari Store"
+                    placeholderTextColor={theme.textMuted}
+                  />
+                </View>
+                <TouchableOpacity style={[styles.saveBtn, { backgroundColor: theme.primary }]} onPress={handleSaveStoreInfo} activeOpacity={0.8}>
+                  <Ionicons name="checkmark" size={16} color="#ffffff" />
+                  <Text style={styles.saveBtnText}>SAVE SETTINGS</Text>
+                </TouchableOpacity>
               </View>
             </View>
+          )}
 
-            <TouchableOpacity style={styles.dangerBtn} onPress={handleFactoryReset} activeOpacity={0.8}>
-              <Ionicons name="trash" size={16} color="#ffffff" />
-              <Text style={styles.actionBtnText}>EXECUTE FACTORY RESET</Text>
-            </TouchableOpacity>
-          </View>
-        )}
-      </ScrollView>
-    </View>
+          {/* APPEARANCE TAB */}
+          {activeSection === 'APPEARANCE' && (
+            <View style={[styles.card, { backgroundColor: theme.surface, borderColor: theme.border }]}>
+              <View style={styles.cardHeader}>
+                <View style={[styles.badgeIcon, { backgroundColor: theme.primaryGlow }]}>
+                  <Ionicons name="color-palette" size={20} color={theme.primary} />
+                </View>
+                <View style={{ flex: 1 }}>
+                  <Text style={[styles.cardTitle, { color: theme.textPrimary }]}>Appearance</Text>
+                  <Text style={[styles.cardSub, { color: theme.textSecondary }]}>Customize how your POS looks</Text>
+                </View>
+              </View>
+
+              <View style={{ flexDirection: 'row', gap: 16 }}>
+                <TouchableOpacity 
+                  style={[styles.themeBox, { borderColor: settings.theme === 'light' ? theme.primary : theme.border, backgroundColor: settings.theme === 'light' ? theme.primaryGlow : theme.bg }]}
+                  onPress={() => settings.theme === 'dark' && toggleTheme()}
+                  activeOpacity={0.8}
+                >
+                  <Ionicons name="sunny" size={24} color={settings.theme === 'light' ? theme.primary : theme.textSecondary} />
+                  <Text style={[styles.themeTitle, { color: settings.theme === 'light' ? theme.primary : theme.textPrimary }]}>LIGHT</Text>
+                  <Text style={[styles.themeSub, { color: theme.textSecondary }]}>Light interface</Text>
+                </TouchableOpacity>
+                
+                <TouchableOpacity 
+                  style={[styles.themeBox, { borderColor: settings.theme === 'dark' ? theme.primary : theme.border, backgroundColor: settings.theme === 'dark' ? theme.primaryGlow : theme.bg }]}
+                  onPress={() => settings.theme === 'light' && toggleTheme()}
+                  activeOpacity={0.8}
+                >
+                  <Ionicons name="moon" size={24} color={settings.theme === 'dark' ? theme.primary : theme.textSecondary} />
+                  <Text style={[styles.themeTitle, { color: settings.theme === 'dark' ? theme.primary : theme.textPrimary }]}>DARK</Text>
+                  <Text style={[styles.themeSub, { color: theme.textSecondary }]}>Dark interface</Text>
+                </TouchableOpacity>
+              </View>
+            </View>
+          )}
+          {/* CASH DRAWER TAB */}
+          {activeSection === 'CASH_DRAWER' && (
+            <View style={[styles.card, { backgroundColor: theme.surface, borderColor: theme.border }]}>
+              <View style={styles.cardHeader}>
+                <View style={[styles.badgeIcon, { backgroundColor: theme.primaryGlow }]}>
+                  <Ionicons name="cash" size={20} color={theme.primary} />
+                </View>
+                <View style={{ flex: 1 }}>
+                  <Text style={[styles.cardTitle, { color: theme.textPrimary }]}>Cash Drawer Settings</Text>
+                  <Text style={[styles.cardSub, { color: theme.textSecondary }]}>Persistent defaults for shift management</Text>
+                </View>
+              </View>
+
+              <View style={styles.horizontalForm}>
+                <View style={{ flex: 1, gap: 6 }}>
+                  <Text style={[styles.fieldLabel, { color: theme.textSecondary }]}>DEFAULT OPENING CASH (₱)</Text>
+                  <TextInput
+                    style={[styles.input, { backgroundColor: theme.bg, color: theme.textPrimary, borderColor: theme.border }]}
+                    value={form.default_opening_cash}
+                    onChangeText={v => setForm({ ...form, default_opening_cash: v })}
+                    placeholder="e.g. 2000"
+                    keyboardType="numeric"
+                    placeholderTextColor={theme.textMuted}
+                  />
+                  <Text style={{ fontSize: 11, color: theme.textMuted, marginTop: 2 }}>This amount is suggested when starting a new business day.</Text>
+                </View>
+                <TouchableOpacity style={[styles.saveBtn, { backgroundColor: theme.primary, alignSelf: 'flex-start', marginTop: 20 }]} onPress={handleSaveStoreInfo} activeOpacity={0.8}>
+                  <Ionicons name="checkmark" size={16} color="#ffffff" />
+                  <Text style={styles.saveBtnText}>SAVE SETTINGS</Text>
+                </TouchableOpacity>
+              </View>
+            </View>
+          )}
+
+          {/* DATA TAB */}
+          {activeSection === 'DATA' && (
+            <View style={[styles.card, { backgroundColor: theme.surface, borderColor: theme.border }]}>
+              <View style={styles.cardHeader}>
+                <View style={[styles.badgeIcon, { backgroundColor: theme.successGlow }]}>
+                  <Ionicons name="cloud-upload" size={20} color={theme.success} />
+                </View>
+                <View style={{ flex: 1 }}>
+                  <Text style={[styles.cardTitle, { color: theme.textPrimary }]}>Data & Backup</Text>
+                  <Text style={[styles.cardSub, { color: theme.textSecondary }]}>Manage your POS data</Text>
+                </View>
+              </View>
+
+              <View style={{ flexDirection: 'row', gap: 16 }}>
+                <View style={[styles.dataBox, { backgroundColor: theme.bg, borderColor: theme.border }]}>
+                  <Text style={[styles.dataTitle, { color: theme.textPrimary }]}>BACKUP DATABASE</Text>
+                  <Text style={[styles.dataSub, { color: theme.textSecondary }]}>Save a complete copy of your POS data</Text>
+                  <TouchableOpacity style={[styles.dataBtn, { backgroundColor: theme.primary }]} onPress={handleExportJSON} activeOpacity={0.8}>
+                    <Ionicons name="archive" size={16} color="#ffffff" />
+                    <Text style={styles.dataBtnText}>EXPORT JSON</Text>
+                  </TouchableOpacity>
+                </View>
+                
+                <View style={[styles.dataBox, { backgroundColor: theme.bg, borderColor: theme.border }]}>
+                  <Text style={[styles.dataTitle, { color: theme.textPrimary }]}>SALES & INVENTORY</Text>
+                  <Text style={[styles.dataSub, { color: theme.textSecondary }]}>Export information for Excel</Text>
+                  <TouchableOpacity style={[styles.dataBtn, { backgroundColor: theme.success }]} onPress={handleExportCSVReport} activeOpacity={0.8}>
+                    <Ionicons name="list" size={16} color="#ffffff" />
+                    <Text style={styles.dataBtnText}>EXPORT CSV</Text>
+                  </TouchableOpacity>
+                </View>
+              </View>
+            </View>
+          )}
+
+          {/* RESET TAB */}
+          {activeSection === 'RESET' && (
+            <View style={[styles.card, { backgroundColor: theme.surface, borderColor: theme.danger }]}>
+              <View style={styles.cardHeader}>
+                <View style={[styles.badgeIcon, { backgroundColor: theme.dangerGlow }]}>
+                  <Ionicons name="warning" size={20} color={theme.danger} />
+                </View>
+                <View style={{ flex: 1 }}>
+                  <Text style={[styles.cardTitle, { color: theme.danger }]}>Factory Reset</Text>
+                  <Text style={[styles.cardSub, { color: theme.textSecondary }]}>Permanently remove all POS data.</Text>
+                  <Text style={[styles.cardSub, { color: theme.textSecondary, marginTop: 2 }]}>This includes products, sales, customers, Utang, cash drawer history, and settings.</Text>
+                </View>
+              </View>
+
+              <View style={{ alignItems: 'flex-start', marginTop: 8 }}>
+                <TouchableOpacity style={styles.dangerBtn} onPress={handleFactoryReset} activeOpacity={0.8}>
+                  <Ionicons name="trash" size={16} color="#ffffff" />
+                  <Text style={styles.saveBtnText}>FACTORY RESET</Text>
+                </TouchableOpacity>
+              </View>
+            </View>
+          )}
+          
+        </ScrollView>
+      </View>
+    </SafeAreaView>
   );
 };
 
 const styles = StyleSheet.create({
   container: { flex: 1 },
-  topSubBar: { borderBottomWidth: 1, paddingVertical: 10 },
-  topSubScroll: { gap: 10, paddingHorizontal: 14 },
-  navTab: { flexDirection: 'row', alignItems: 'center', gap: 8, paddingHorizontal: 16, height: 42, borderRadius: 10, borderWidth: 1 },
-  dangerNavTab: { borderColor: 'rgba(239, 68, 68, 0.4)', backgroundColor: 'rgba(239, 68, 68, 0.08)' },
-  navTabText: { fontSize: 12, fontWeight: 'bold', letterSpacing: 0.5 },
+  headerContainer: { paddingVertical: 12, borderBottomWidth: 1 },
+  headerTitleRow: { flexDirection: 'row', alignItems: 'flex-end', paddingHorizontal: 20, marginBottom: 12, gap: 12 },
+  pageTitle: { fontSize: 20, fontWeight: '900', letterSpacing: 0.5 },
+  pageSub: { fontSize: 13, fontWeight: '500', marginBottom: 2 },
   
-  cyberCard: { padding: 18, borderRadius: 14, borderWidth: 1, gap: 12 },
-  cardHeader: { flexDirection: 'row', alignItems: 'center', gap: 14, marginBottom: 8 },
-  badgeIcon: { width: 42, height: 42, borderRadius: 10, justifyContent: 'center', alignItems: 'center' },
-  cardTitle: { fontSize: 16, fontWeight: 'bold' },
+  navScroll: { paddingHorizontal: 16, gap: 4 },
+  navTab: { flexDirection: 'row', alignItems: 'center', gap: 6, paddingHorizontal: 16, paddingVertical: 8, borderRadius: 20 },
+  navTabText: { fontSize: 13, fontWeight: '800' },
+  
+  contentContainer: { flex: 1 },
+  contentScroll: { padding: 20, paddingBottom: 40 },
+  
+  card: { padding: 20, borderRadius: 12, borderWidth: 1, gap: 20, maxWidth: 800 },
+  cardHeader: { flexDirection: 'row', alignItems: 'center', gap: 16 },
+  badgeIcon: { width: 44, height: 44, borderRadius: 10, justifyContent: 'center', alignItems: 'center' },
+  cardTitle: { fontSize: 16, fontWeight: '800' },
   cardSub: { fontSize: 12, marginTop: 2 },
   
-  fieldLabel: { fontSize: 12, fontWeight: 'bold', letterSpacing: 0.5, marginTop: 4 },
-  cyberInput: { paddingHorizontal: 14, height: 46, borderRadius: 10, borderWidth: 1, fontSize: 14, fontWeight: 'bold' },
+  horizontalForm: { flexDirection: 'row', alignItems: 'flex-end', gap: 16 },
+  fieldLabel: { fontSize: 10, fontWeight: '800', letterSpacing: 0.5 },
+  input: { height: 44, paddingHorizontal: 14, borderRadius: 8, borderWidth: 1, fontSize: 14, fontWeight: '600' },
   
-  actionBtn: { flexDirection: 'row', justifyContent: 'center', alignItems: 'center', gap: 8, paddingVertical: 14, borderRadius: 10, marginTop: 10 },
-  actionBtnText: { color: '#ffffff', fontSize: 14, fontWeight: 'bold', letterSpacing: 0.5 },
+  saveBtn: { flexDirection: 'row', alignItems: 'center', gap: 6, height: 44, paddingHorizontal: 20, borderRadius: 8 },
+  saveBtnText: { color: '#ffffff', fontSize: 13, fontWeight: '800', letterSpacing: 0.5 },
   
-  switchRow: { flexDirection: 'row', alignItems: 'center', padding: 16, borderRadius: 12, borderWidth: 1 },
-  switchTitle: { fontSize: 14, fontWeight: 'bold' },
-  switchSub: { fontSize: 12, marginTop: 2 },
+  themeBox: { flex: 1, padding: 16, borderRadius: 10, borderWidth: 1, alignItems: 'flex-start' },
+  themeTitle: { fontSize: 14, fontWeight: '800', marginTop: 12, marginBottom: 2 },
+  themeSub: { fontSize: 12 },
   
-  exportCard: { flexDirection: 'row', alignItems: 'center', gap: 14, padding: 16, borderRadius: 12 },
-  exportTitle: { color: '#ffffff', fontSize: 14, fontWeight: 'bold', letterSpacing: 0.5 },
-  exportSub: { color: 'rgba(255,255,255,0.85)', fontSize: 12, marginTop: 2 },
+  dataBox: { flex: 1, padding: 16, borderRadius: 10, borderWidth: 1, justifyContent: 'space-between' },
+  dataTitle: { fontSize: 12, fontWeight: '800', letterSpacing: 0.5 },
+  dataSub: { fontSize: 11, marginTop: 4, marginBottom: 16, flex: 1 },
+  dataBtn: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 6, height: 40, borderRadius: 8 },
+  dataBtnText: { color: '#ffffff', fontSize: 12, fontWeight: '800', letterSpacing: 0.5 },
   
-  dangerBtn: { flexDirection: 'row', justifyContent: 'center', alignItems: 'center', gap: 8, backgroundColor: '#ef4444', paddingVertical: 14, borderRadius: 10, marginTop: 12 }
+  dangerBtn: { flexDirection: 'row', alignItems: 'center', gap: 6, backgroundColor: '#ef4444', height: 44, paddingHorizontal: 20, borderRadius: 8 }
 });

@@ -1,321 +1,290 @@
-import React, { useState } from 'react';
-import {
-  View,
-  Text,
-  TouchableOpacity,
-  StyleSheet,
-  FlatList,
-  Modal,
-  Alert,
-  Share
-} from 'react-native';
-import { usePOS } from '../context/POSContext';
-import { Category } from '../types';
-import { CategoryModal } from '../components/CategoryModal';
-import { CategoryProductsScreen } from './CategoryProductsScreen';
 import { Ionicons } from '@expo/vector-icons';
+import React, { useState } from 'react';
+import { Alert, FlatList, Modal, ScrollView, Share, StyleSheet, Text, TextInput, TouchableOpacity, useWindowDimensions, View } from 'react-native';
+import { CategoryModal } from '../components/CategoryModal';
+import { ProductDetailsModal } from '../components/ProductDetailsModal';
+import { ProductModal } from '../components/ProductModal';
+import { StockHistoryModal } from '../components/StockHistoryModal';
+import { StockModal } from '../components/StockModal';
+import { usePOS } from '../context/POSContext';
 import { getTheme } from '../theme/theme';
+import { Product } from '../types';
 
 export const InventoryScreen: React.FC = () => {
-  const { products, categories, settings } = usePOS();
+  const { products, settings } = usePOS();
   const theme = getTheme(settings.theme === 'dark');
+  const { width } = useWindowDimensions();
+  const isLandscape = width > 700;
 
-  const [activeCategoryScreen, setActiveCategoryScreen] = useState<Category | 'ALL' | null>(null);
+  const [searchQuery, setSearchQuery] = useState('');
+  const [filterType, setFilterType] = useState<'ALL' | 'LOW_STOCK' | 'OUT_OF_STOCK' | 'CATEGORY'>('ALL');
+  const [selectedCategoryId, setSelectedCategoryId] = useState<string | null>(null);
+  
+  const [productModalVisible, setProductModalVisible] = useState(false);
+  const [stockModalVisible, setStockModalVisible] = useState(false);
+  const [detailsModalVisible, setDetailsModalVisible] = useState(false);
+  const [historyModalVisible, setHistoryModalVisible] = useState(false);
   const [categoryModalVisible, setCategoryModalVisible] = useState(false);
-  const [stockAlertModalVisible, setStockAlertModalVisible] = useState(false);
+  
+  const [addMenuVisible, setAddMenuVisible] = useState(false);
+  const [selectedProduct, setSelectedProduct] = useState<Product | null>(null);
 
-  // Overall Inventory Stats
   const totalProducts = products.length;
   const lowStockItems = products.filter(p => p.stock_pieces <= p.min_stock_pieces && p.stock_pieces > 0);
   const outOfStockItems = products.filter(p => p.stock_pieces < 1);
-  
-  // Unified alert list
-  const allAlertItems = [...outOfStockItems, ...lowStockItems];
   const inventoryValuation = products.reduce((sum, p) => sum + (p.stock_pieces * p.buying_price_piece), 0);
 
-  const getCategoryProductCount = (catId: string) => {
-    return products.filter(p => p.category_id === catId).length;
-  };
+  const filteredProducts = products.filter(p => {
+    let matchesFilter = true;
+    if (filterType === 'LOW_STOCK') matchesFilter = p.stock_pieces <= p.min_stock_pieces && p.stock_pieces > 0;
+    else if (filterType === 'OUT_OF_STOCK') matchesFilter = p.stock_pieces < 1;
+    else if (filterType === 'CATEGORY' && selectedCategoryId) matchesFilter = p.category_id === selectedCategoryId;
 
-  // Generate and share beautifully formatted RAW TEXT
-  const handleShareStockAlert = async () => {
+    const matchesSearch = p.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
+                          (p.barcode && p.barcode.includes(searchQuery));
+                          
+    return matchesFilter && matchesSearch;
+  });
+
+  const handleShareAlerts = async () => {
     try {
-      if (allAlertItems.length === 0) {
-        Alert.alert('Inventory Healthy', 'There are no low stock or out of stock items to share.');
-        return;
-      }
+      let text = `SariPOS Inventory Alerts\n\nLow Stock: ${lowStockItems.length}\nOut of Stock: ${outOfStockItems.length}\n\n`;
+      text += `LOW STOCK\n`;
+      if (lowStockItems.length === 0) text += `- None\n`;
+      lowStockItems.forEach(p => text += `- ${p.name} — ${p.stock_pieces} pcs\n`);
+      text += `\nOUT OF STOCK\n`;
+      if (outOfStockItems.length === 0) text += `- None\n`;
+      outOfStockItems.forEach(p => text += `- ${p.name} — 0 pcs\n`);
 
-      let text = `🏪 *${settings.store_name || 'Store'} - Reorder Report*\n`;
-      text += `📅 Date: ${new Date().toLocaleDateString()}\n\n`;
-
-      text += `⚠️ *LOW STOCK ITEMS*\n`;
-      if (lowStockItems.length === 0) {
-        text += `  • None\n`;
-      } else {
-        lowStockItems.forEach(p => {
-          text += `  • ${p.name}\n`;
-        });
-      }
-
-      text += `\n❌ *OUT OF STOCK ITEMS*\n`;
-      if (outOfStockItems.length === 0) {
-        text += `  • None\n`;
-      } else {
-        outOfStockItems.forEach(p => {
-          text += `  • ${p.name}\n`;
-        });
-      }
-
-      text += `\n------------------------\nGenerated via POS System`;
-
-      // Uses React Native's native Share API to send as plain text message
-      await Share.share({
-        message: text,
-        title: 'Stock Reorder Alert'
-      });
-
+      await Share.share({ message: text });
     } catch (e: any) {
       Alert.alert('Share Error', e.message);
     }
   };
 
-  if (activeCategoryScreen !== null) {
+  const renderProduct = ({ item }: { item: Product }) => {
+    const isPack = item.pricing_type === 'PACK' && item.pieces_per_pack > 0;
+    const packs = isPack ? Math.floor(item.stock_pieces / item.pieces_per_pack) : 0;
+    const remainder = isPack ? item.stock_pieces % item.pieces_per_pack : 0;
+    
+    const stockText = isPack 
+      ? `${item.stock_pieces} ${item.unit_piece_name || 'pcs'} • ${packs} ${item.unit_pack_name || 'packs'}${remainder > 0 ? ` + ${remainder}` : ''}`
+      : `${item.stock_pieces} ${item.unit_piece_name || 'pcs'}`;
+
+    const priceText = isPack
+      ? `Piece ₱${item.selling_price_piece.toFixed(2)} • Pack ₱${item.selling_price_pack.toFixed(2)}`
+      : `Piece ₱${item.selling_price_piece.toFixed(2)}`;
+
+    const isOut = item.stock_pieces < 1;
+    const isLow = item.stock_pieces <= item.min_stock_pieces && !isOut;
+
     return (
-      <CategoryProductsScreen
-        category={activeCategoryScreen}
-        onBack={() => setActiveCategoryScreen(null)}
-      />
+      <View style={[styles.productRow, { backgroundColor: theme.surface, borderColor: theme.border, flex: isLandscape ? 0.5 : 1, marginHorizontal: isLandscape ? 4 : 0 }]}>
+        <View style={styles.productInfo}>
+          <Text style={[styles.productName, { color: theme.textPrimary }]} numberOfLines={1}>{item.name}</Text>
+          
+          <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6, marginVertical: 4 }}>
+            <Text style={[styles.productStock, { color: isOut ? theme.danger : isLow ? theme.warning : theme.success }]}>
+              {stockText}
+            </Text>
+          </View>
+          
+          <Text style={[styles.productPrices, { color: theme.textSecondary }]}>{priceText}</Text>
+          <Text style={[styles.productCost, { color: theme.textMuted }]}>Cost ₱{item.buying_price_piece.toFixed(2)}/pc</Text>
+        </View>
+
+        <View style={styles.actionCol}>
+          <TouchableOpacity 
+            style={[styles.btnMenu, { backgroundColor: theme.surfaceElevated, borderColor: theme.border }]} 
+            onPress={() => { setSelectedProduct(item); setDetailsModalVisible(true); }}
+            activeOpacity={0.7}
+          >
+            <Text style={[styles.btnMenuText, { color: theme.textPrimary }]} numberOfLines={1}>Adjustments</Text>
+          </TouchableOpacity>
+        </View>
+      </View>
     );
-  }
+  };
 
   return (
     <View style={[styles.container, { backgroundColor: theme.bg }]}>
-      
-      {/* 1. TOP ANALYTICS BANNER */}
-      <View style={styles.statsBanner}>
-        <View style={[styles.statCard, { backgroundColor: theme.surface, borderColor: theme.border }]}>
-          <Text style={[styles.statLabel, { color: theme.textSecondary }]}>TOTAL PRODUCTS</Text>
-          <Text style={[styles.statVal, { color: theme.textPrimary }]}>{totalProducts}</Text>
+      {/* HEADER ROW */}
+      <View style={styles.headerRow}>
+        <View style={{ flexDirection: 'row', alignItems: 'center', gap: 16 }}>
+          <Text style={[styles.screenTitle, { color: theme.textPrimary }]}>INVENTORY</Text>
+          <Text style={[styles.summaryText, { color: theme.textSecondary }]}>Products: {totalProducts}   Value: ₱{inventoryValuation.toFixed(2)}</Text>
         </View>
-
-        {/* UNIFIED STOCK ALERTS CARD */}
-        <TouchableOpacity
-          style={[styles.statCard, { backgroundColor: theme.surface, borderColor: allAlertItems.length > 0 ? theme.danger : theme.border }]}
-          onPress={() => setStockAlertModalVisible(true)}
-          activeOpacity={0.7}
-        >
-          <View style={styles.statHeaderRow}>
-            <Text style={[styles.statLabel, { color: allAlertItems.length > 0 ? theme.danger : theme.textSecondary }]}>
-              STOCK ALERTS
-            </Text>
-            <Ionicons name="alert-circle" size={14} color={allAlertItems.length > 0 ? theme.danger : theme.textSecondary} />
+        <View style={styles.headerActions}>
+          <View style={[styles.searchBar, { backgroundColor: theme.surface, borderColor: theme.border }]}>
+            <Ionicons name="search" size={16} color={theme.textSecondary} />
+            <TextInput
+              style={[styles.searchInput, { color: theme.textPrimary }]}
+              placeholder="Search products..."
+              placeholderTextColor={theme.textMuted}
+              value={searchQuery}
+              onChangeText={setSearchQuery}
+            />
+            {searchQuery !== '' && (
+              <TouchableOpacity onPress={() => setSearchQuery('')} style={{ padding: 4 }}>
+                <Ionicons name="close-circle" size={14} color={theme.textMuted} />
+              </TouchableOpacity>
+            )}
           </View>
-          <Text style={[styles.statVal, { color: allAlertItems.length > 0 ? theme.danger : theme.textSecondary }]}>
-            {allAlertItems.length}
-          </Text>
-        </TouchableOpacity>
-
-        <View style={[styles.statCard, { backgroundColor: theme.surface, borderColor: theme.border }]}>
-          <Text style={[styles.statLabel, { color: theme.textSecondary }]}>VALUATION</Text>
-          <Text style={[styles.statVal, { color: theme.success }]}>₱{inventoryValuation.toFixed(2)}</Text>
+          <TouchableOpacity 
+            style={[styles.btnAdd, { backgroundColor: theme.primary }]}
+            onPress={() => setAddMenuVisible(true)}
+          >
+            <Ionicons name="add" size={18} color="#fff" />
+            <Text style={styles.btnAddText}>Add ▾</Text>
+          </TouchableOpacity>
         </View>
       </View>
 
-      {/* 2. DIRECTORY HEADER & TOOLBAR */}
-      <View style={[styles.headerBar, { backgroundColor: theme.surface, borderColor: theme.border }]}>
-        <View style={styles.headerLeftGroup}>
-          <TouchableOpacity
-            style={[styles.actionBtn, { backgroundColor: theme.primary }]}
-            onPress={() => setCategoryModalVisible(true)}
-            activeOpacity={0.8}
+      {/* ALERTS CONTAINER */}
+      <View style={[styles.alertsContainer, { backgroundColor: theme.surface, borderColor: theme.border }]}>
+        <View style={{ flexDirection: 'row', alignItems: 'center', gap: 16 }}>
+          <Text style={[styles.alertsTitle, { color: theme.textPrimary }]}>INVENTORY ALERTS</Text>
+          <TouchableOpacity onPress={() => setFilterType('LOW_STOCK')} style={styles.alertChip}>
+            <Text style={{ color: theme.warning, fontSize: 13, fontWeight: '700' }}>🔶 Low Stock   {lowStockItems.length}</Text>
+          </TouchableOpacity>
+          <TouchableOpacity onPress={() => setFilterType('OUT_OF_STOCK')} style={styles.alertChip}>
+            <Text style={{ color: theme.danger, fontSize: 13, fontWeight: '700' }}>🔴 Out of Stock   {outOfStockItems.length}</Text>
+          </TouchableOpacity>
+        </View>
+        <TouchableOpacity style={{ padding: 6 }} onPress={handleShareAlerts}>
+          <Ionicons name="share-outline" size={20} color={theme.accent} />
+        </TouchableOpacity>
+      </View>
+
+      {/* FILTERS */}
+      <View style={{ marginBottom: 12, zIndex: 10 }}>
+        <ScrollView 
+          horizontal 
+          showsHorizontalScrollIndicator={false} 
+          contentContainerStyle={[styles.filterRow, { paddingRight: 16, paddingVertical: 4 }]}
+          keyboardShouldPersistTaps="handled"
+        >
+          <TouchableOpacity 
+            style={[styles.filterChip, filterType === 'ALL' && { backgroundColor: theme.primary, borderColor: theme.primary }]} 
+            onPress={() => setFilterType('ALL')}
+            activeOpacity={0.7}
           >
-            <Ionicons name="folder-open" size={16} color="#ffffff" />
-            <Text style={styles.actionBtnText}>Category Manager</Text>
+            <Text style={[styles.filterText, filterType === 'ALL' ? { color: '#fff' } : { color: theme.textSecondary }]}>All</Text>
+          </TouchableOpacity>
+          <TouchableOpacity 
+            style={[styles.filterChip, filterType === 'LOW_STOCK' && { backgroundColor: theme.primary, borderColor: theme.primary }]} 
+            onPress={() => setFilterType('LOW_STOCK')}
+            activeOpacity={0.7}
+          >
+            <Text style={[styles.filterText, filterType === 'LOW_STOCK' ? { color: '#fff' } : { color: theme.textSecondary }]}>Low Stock</Text>
+          </TouchableOpacity>
+          <TouchableOpacity 
+            style={[styles.filterChip, filterType === 'OUT_OF_STOCK' && { backgroundColor: theme.primary, borderColor: theme.primary }]} 
+            onPress={() => setFilterType('OUT_OF_STOCK')}
+            activeOpacity={0.7}
+          >
+            <Text style={[styles.filterText, filterType === 'OUT_OF_STOCK' ? { color: '#fff' } : { color: theme.textSecondary }]}>Out of Stock</Text>
           </TouchableOpacity>
 
-          <View style={styles.headerTitleGroup}>
-            <Text style={[styles.directoryTitle, { color: theme.textPrimary }]}>CATEGORIES DIRECTORY</Text>
-            <Text style={[styles.directorySub, { color: theme.textSecondary }]}>
-              Select a category folder to manage inventory
-            </Text>
-          </View>
-        </View>
+          <View style={{ width: 1, height: '60%', backgroundColor: theme.border, marginHorizontal: 4, alignSelf: 'center' }} />
 
-        <View style={[styles.countBadge, { backgroundColor: theme.surfaceElevated, borderColor: theme.border }]}>
-          <Ionicons name="pricetags-outline" size={16} color={theme.accent} />
-          <Text style={[styles.countBadgeText, { color: theme.textPrimary }]}>
-            {categories.length} Categories
-          </Text>
-        </View>
+          {usePOS().categories.map(c => (
+            <TouchableOpacity 
+              key={c.id}
+              style={[styles.filterChip, (filterType === 'CATEGORY' && selectedCategoryId === c.id) ? { backgroundColor: theme.primary, borderColor: theme.primary } : { backgroundColor: theme.surface, borderColor: theme.border }]} 
+              onPress={() => { setFilterType('CATEGORY'); setSelectedCategoryId(c.id); }}
+              activeOpacity={0.7}
+            >
+              <Text style={[styles.filterText, (filterType === 'CATEGORY' && selectedCategoryId === c.id) ? { color: '#fff' } : { color: theme.textSecondary }]}>{c.name}</Text>
+            </TouchableOpacity>
+          ))}
+        </ScrollView>
       </View>
 
-      {/* 3. CATEGORY CARDS LIST */}
-      <View style={{ flex: 1 }}>
-        <TouchableOpacity
-          style={[
-            styles.rectCard,
-            { backgroundColor: theme.surface, borderColor: theme.accent, borderWidth: 2, marginBottom: 12 }
-          ]}
-          onPress={() => setActiveCategoryScreen('ALL')}
-          activeOpacity={0.7}
-        >
-          <View style={styles.rectLeft}>
-            <View style={[styles.rectBadge, { backgroundColor: theme.primaryGlow }]}>
-              <Ionicons name="apps" size={20} color={theme.accent} />
-            </View>
-            <View>
-              <Text style={[styles.rectTitle, { color: theme.textPrimary }]}>All Products</Text>
-              <Text style={[styles.rectSub, { color: theme.textSecondary }]}>Complete Store Catalog</Text>
-            </View>
+      {/* PRODUCT LIST */}
+      <FlatList
+        key={isLandscape ? '2col' : '1col'}
+        numColumns={isLandscape ? 2 : 1}
+        data={filteredProducts}
+        keyExtractor={item => item.id}
+        renderItem={renderProduct}
+        contentContainerStyle={{ paddingBottom: 24, gap: isLandscape ? 8 : 10 }}
+        columnWrapperStyle={isLandscape ? { gap: 8 } : undefined}
+        showsVerticalScrollIndicator={false}
+        ListEmptyComponent={
+          <View style={{ padding: 40, alignItems: 'center' }}>
+            <Ionicons name="cube-outline" size={48} color={theme.textMuted} />
+            <Text style={{ color: theme.textSecondary, marginTop: 12, fontSize: 16 }}>No products found.</Text>
           </View>
+        }
+      />
 
-          <View style={styles.rectRight}>
-            <View style={[styles.countPill, { backgroundColor: theme.primaryGlow }]}>
-              <Text style={[styles.countPillText, { color: theme.accent }]}>{products.length} Items</Text>
-            </View>
-            <Ionicons name="chevron-forward" size={18} color={theme.accent} />
+      {/* ADD MENU MODAL */}
+      <Modal visible={addMenuVisible} transparent animationType="fade" onRequestClose={() => setAddMenuVisible(false)}>
+        <TouchableOpacity style={styles.menuOverlay} activeOpacity={1} onPress={() => setAddMenuVisible(false)}>
+          <View style={[styles.menuBox, { backgroundColor: theme.surface, borderColor: theme.border }]}>
+            <TouchableOpacity style={styles.menuItem} onPress={() => { setAddMenuVisible(false); setSelectedProduct(null); setProductModalVisible(true); }}>
+              <Ionicons name="cube-outline" size={20} color={theme.textPrimary} />
+              <Text style={[styles.menuItemText, { color: theme.textPrimary }]}>Add Product</Text>
+            </TouchableOpacity>
+            <View style={{ height: 1, backgroundColor: theme.border }} />
+            <TouchableOpacity style={styles.menuItem} onPress={() => { setAddMenuVisible(false); setCategoryModalVisible(true); }}>
+              <Ionicons name="folder-outline" size={20} color={theme.textPrimary} />
+              <Text style={[styles.menuItemText, { color: theme.textPrimary }]}>Add Category</Text>
+            </TouchableOpacity>
           </View>
         </TouchableOpacity>
-
-        <FlatList
-          data={categories}
-          keyExtractor={cat => cat.id}
-          contentContainerStyle={{ paddingBottom: 20, gap: 10 }}
-          showsVerticalScrollIndicator={false}
-          renderItem={({ item: cat }) => {
-            const count = getCategoryProductCount(cat.id);
-
-            return (
-              <TouchableOpacity
-                style={[styles.rectCard, { backgroundColor: theme.surface, borderColor: theme.border }]}
-                onPress={() => setActiveCategoryScreen(cat)}
-                activeOpacity={0.7}
-              >
-                <View style={styles.rectLeft}>
-                  <View style={[styles.rectBadge, { backgroundColor: theme.surfaceElevated }]}>
-                    <Ionicons name="pricetag" size={18} color={theme.accent} />
-                  </View>
-                  <View>
-                    <Text style={[styles.rectTitle, { color: theme.textPrimary }]}>{cat.name}</Text>
-                    <Text style={[styles.rectSub, { color: theme.textSecondary }]}>Category Folder</Text>
-                  </View>
-                </View>
-
-                <View style={styles.rectRight}>
-                  <View style={[styles.countPill, { backgroundColor: theme.surfaceElevated }]}>
-                    <Text style={[styles.countPillText, { color: theme.textSecondary }]}>
-                      {count} {count === 1 ? 'Item' : 'Items'}
-                    </Text>
-                  </View>
-                  <Ionicons name="chevron-forward" size={18} color={theme.textSecondary} />
-                </View>
-              </TouchableOpacity>
-            );
-          }}
-        />
-      </View>
-
-      <CategoryModal visible={categoryModalVisible} onClose={() => setCategoryModalVisible(false)} />
-
-      {/* COMBINED LOW & OUT OF STOCK REORDER MODAL */}
-      <Modal visible={stockAlertModalVisible} transparent animationType="fade" onRequestClose={() => setStockAlertModalVisible(false)}>
-        <View style={styles.modalOverlay}>
-          <View style={[styles.modalCard, { backgroundColor: theme.surface, borderColor: theme.border }]}>
-            
-            <View style={[styles.modalHeader, { borderBottomColor: theme.border }]}>
-              <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
-                <Ionicons name="warning-outline" size={18} color={theme.warning} />
-                <Text style={[styles.modalTitle, { color: theme.textPrimary }]}>Inventory Reorder Report</Text>
-              </View>
-              <TouchableOpacity onPress={() => setStockAlertModalVisible(false)} style={{ padding: 4 }}>
-                <Ionicons name="close" size={20} color={theme.textSecondary} />
-              </TouchableOpacity>
-            </View>
-
-            {allAlertItems.length === 0 ? (
-              <View style={{ padding: 30, alignItems: 'center' }}>
-                <Ionicons name="checkmark-circle-outline" size={42} color={theme.success} />
-                <Text style={{ color: theme.textPrimary, fontSize: 14, fontWeight: 'bold', marginTop: 8 }}>
-                  All Stock Levels Healthy!
-                </Text>
-              </View>
-            ) : (
-              <FlatList
-                data={allAlertItems}
-                keyExtractor={p => p.id}
-                style={{ maxHeight: 300, marginTop: 8 }}
-                showsVerticalScrollIndicator={true}
-                renderItem={({ item }) => {
-                  const isOut = item.stock_pieces < 1;
-                  return (
-                    <View style={[styles.alertRow, { backgroundColor: theme.bg, borderColor: theme.border }]}>
-                      <View style={{ flex: 1 }}>
-                        <Text style={[styles.alertProdName, { color: theme.textPrimary }]}>{item.name}</Text>
-                        <Text style={[styles.alertProdMeta, { color: theme.textSecondary }]}>
-                          Category: {item.category_name || 'General'}
-                        </Text>
-                      </View>
-
-                      <View style={[styles.alertBadge, { backgroundColor: isOut ? theme.dangerGlow : theme.warningGlow }]}>
-                        <Text style={[styles.alertBadgeText, { color: isOut ? theme.danger : theme.warning }]}>
-                          {isOut ? 'OUT OF STOCK' : `${item.stock_pieces} ${item.unit_piece_name}s left`}
-                        </Text>
-                      </View>
-                    </View>
-                  );
-                }}
-              />
-            )}
-
-            <TouchableOpacity
-              style={[styles.shareBtn, { backgroundColor: theme.success }]}
-              onPress={handleShareStockAlert}
-              activeOpacity={0.8}
-            >
-              <Ionicons name="share-social" size={16} color="#ffffff" />
-              <Text style={styles.shareBtnText}>Send / Share Reorder Text</Text>
-            </TouchableOpacity>
-
-          </View>
-        </View>
       </Modal>
+
+      <ProductDetailsModal 
+        visible={detailsModalVisible} 
+        product={selectedProduct} 
+        onClose={() => setDetailsModalVisible(false)} 
+        onEdit={() => setProductModalVisible(true)}
+        onAdjustStock={() => setStockModalVisible(true)}
+        onViewHistory={() => setHistoryModalVisible(true)}
+      />
+      <ProductModal visible={productModalVisible} product={selectedProduct} onClose={() => setProductModalVisible(false)} onOpenCategoryModal={() => setCategoryModalVisible(true)} />
+      <StockModal visible={stockModalVisible} product={selectedProduct} onClose={() => setStockModalVisible(false)} />
+      <StockHistoryModal visible={historyModalVisible} product={selectedProduct} onClose={() => setHistoryModalVisible(false)} />
+      <CategoryModal visible={categoryModalVisible} onClose={() => setCategoryModalVisible(false)} />
     </View>
   );
 };
 
 const styles = StyleSheet.create({
   container: { flex: 1, padding: 14 },
-  statsBanner: { flexDirection: 'row', gap: 12, marginBottom: 14 },
-  statCard: { flex: 1, padding: 12, borderRadius: 12, borderWidth: 1, justifyContent: 'center' },
-  statHeaderRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' },
-  statLabel: { fontSize: 12, fontWeight: 'bold', letterSpacing: 0.5 },
-  statVal: { fontSize: 16, fontWeight: 'bold', marginTop: 4 },
-  headerBar: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 14, padding: 12, borderRadius: 12, borderWidth: 1 },
-  headerLeftGroup: { flexDirection: 'row', alignItems: 'center', gap: 16 },
-  actionBtn: { flexDirection: 'row', alignItems: 'center', gap: 8, paddingVertical: 10, paddingHorizontal: 16, borderRadius: 8 },
-  actionBtnText: { color: '#ffffff', fontSize: 14, fontWeight: 'bold' },
-  headerTitleGroup: { gap: 2 },
-  directoryTitle: { fontSize: 16, fontWeight: 'bold', letterSpacing: 0.5 },
-  directorySub: { fontSize: 12 },
-  countBadge: { flexDirection: 'row', alignItems: 'center', gap: 8, paddingHorizontal: 14, paddingVertical: 10, borderRadius: 8, borderWidth: 1 },
-  countBadgeText: { fontSize: 14, fontWeight: 'bold' },
-  rectCard: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', padding: 14, borderRadius: 12, borderWidth: 1 },
-  rectLeft: { flexDirection: 'row', alignItems: 'center', gap: 14 },
-  rectBadge: { width: 44, height: 44, borderRadius: 10, justifyContent: 'center', alignItems: 'center' },
-  rectTitle: { fontSize: 16, fontWeight: 'bold' },
-  rectSub: { fontSize: 12, marginTop: 2 },
-  rectRight: { flexDirection: 'row', alignItems: 'center', gap: 12 },
-  countPill: { paddingHorizontal: 12, paddingVertical: 6, borderRadius: 12 },
-  countPillText: { fontSize: 12, fontWeight: 'bold' },
-  modalOverlay: { flex: 1, backgroundColor: 'rgba(0,0,0,0.7)', justifyContent: 'center', alignItems: 'center', padding: 16 },
-  modalCard: { width: '90%', maxWidth: 540, borderRadius: 14, borderWidth: 1, padding: 16, gap: 12 },
-  modalHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', paddingBottom: 10, borderBottomWidth: 1 },
-  modalTitle: { fontSize: 16, fontWeight: 'bold' },
-  alertRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', padding: 12, borderRadius: 10, borderWidth: 1, marginBottom: 8 },
-  alertProdName: { fontSize: 14, fontWeight: 'bold' },
-  alertProdMeta: { fontSize: 12, marginTop: 2 },
-  alertBadge: { paddingHorizontal: 10, paddingVertical: 4, borderRadius: 8 },
-  alertBadgeText: { fontSize: 12, fontWeight: 'bold' },
-  shareBtn: { flexDirection: 'row', justifyContent: 'center', alignItems: 'center', gap: 8, paddingVertical: 14, borderRadius: 10, marginTop: 6 },
-  shareBtnText: { color: '#ffffff', fontSize: 14, fontWeight: 'bold' }
+  
+  headerRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 },
+  screenTitle: { fontSize: 18, fontWeight: '900', letterSpacing: 0.5 },
+  summaryText: { fontSize: 13, fontWeight: '700' },
+  headerActions: { flexDirection: 'row', gap: 8, flex: 1, justifyContent: 'flex-end', marginLeft: 16 },
+  searchBar: { flexDirection: 'row', alignItems: 'center', height: 40, borderRadius: 8, borderWidth: 1, paddingHorizontal: 10, flex: 1, maxWidth: 300 },
+  searchInput: { flex: 1, marginLeft: 8, fontSize: 14 },
+  btnAdd: { flexDirection: 'row', alignItems: 'center', height: 40, paddingHorizontal: 12, borderRadius: 8, gap: 6 },
+  btnAddText: { color: '#fff', fontSize: 13, fontWeight: '800' },
+  
+  alertsContainer: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', paddingHorizontal: 12, paddingVertical: 8, borderRadius: 8, borderWidth: 1, marginBottom: 12 },
+  alertsTitle: { fontSize: 12, fontWeight: '800', letterSpacing: 0.5 },
+  alertChip: { paddingHorizontal: 8, paddingVertical: 4 },
+  
+  filterRow: { flexDirection: 'row', alignItems: 'center', gap: 8 },
+  filterChip: { flexDirection: 'row', alignItems: 'center', gap: 6, paddingHorizontal: 12, paddingVertical: 8, borderRadius: 16, borderWidth: 1, borderColor: '#334155' },
+  filterText: { fontSize: 13, fontWeight: '700' },
+
+  productRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', padding: 12, borderRadius: 12, borderWidth: 1 },
+  productInfo: { flex: 1 },
+  productName: { fontSize: 15, fontWeight: '800' },
+  productStock: { fontSize: 14, fontWeight: '800' },
+  productPrices: { fontSize: 13, marginBottom: 2 },
+  productCost: { fontSize: 12 },
+
+  actionCol: { flexDirection: 'row', marginLeft: 16 },
+  btnMenu: { minWidth: 140, paddingHorizontal: 20, paddingVertical: 8, borderRadius: 8, borderWidth: 1, justifyContent: 'center', alignItems: 'center' },
+  btnMenuText: { fontSize: 13, fontWeight: '800' },
+
+  menuOverlay: { flex: 1, backgroundColor: 'rgba(0,0,0,0.3)', justifyContent: 'flex-start', alignItems: 'flex-end', padding: 50 },
+  menuBox: { width: 180, borderRadius: 12, borderWidth: 1, overflow: 'hidden', elevation: 5 },
+  menuItem: { flexDirection: 'row', alignItems: 'center', padding: 16, gap: 12 },
+  menuItemText: { fontSize: 14, fontWeight: '700' }
 });

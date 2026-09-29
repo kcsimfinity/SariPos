@@ -46,14 +46,17 @@ export interface Sale {
   item_discounts: number;
   transaction_discount: number;
   total: number;
-  // FIXED: Aligned with Utang logic ('CASH' or 'CREDIT')
-  payment_method: 'CASH' | 'CREDIT'; 
+  // FIXED: Aligned with Utang logic ('CASH' or 'CREDIT' or 'UTANG_PAYMENT' for history display)
+  payment_method: 'CASH' | 'CREDIT' | 'UTANG_PAYMENT'; 
   amount_paid: number;
   change_amount: number;
   total_cogs: number;
   gross_profit: number;
   // FIXED: Added customer_name to track who owes Utang
   customer_name?: string; 
+  customer_id?: string;
+  is_legacy?: number;
+  remaining_balance?: number;
   items?: SaleItem[];
 }
 
@@ -90,4 +93,25 @@ export interface StoreSettings {
   theme: AppTheme;
   low_stock_threshold: string;
   tax_rate: string;
+  default_opening_cash?: string;
+}
+
+export interface CashDrawerSession {
+  id: string;
+  opened_at: string;
+  closed_at: string | null;
+  opening_cash: number;
+  expected_cash: number;
+  actual_cash: number;
+  variance: number;
+  status: 'OPEN' | 'CLOSED';
+}
+
+export interface StoreExpense {
+  id: string;
+  type: 'EXPENSE' | 'WITHDRAWAL' | 'CASH_IN' | 'ADJUSTMENT';
+  amount: number;
+  description: string;
+  timestamp: string;
+  cash_drawer_session_id: string | null;
 }
